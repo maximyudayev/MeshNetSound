@@ -128,7 +128,7 @@ DWORD WINAPI MicCaptureThread(LPVOID lpParameter)
     EXIT_ON_ERROR(hr)
 
         // Calculate the actual duration of the allocated buffer.
-        hnsActualDuration = (double)REFTIMES_PER_SEC * bufferFrameCount / pwfx->nSamplesPerSec;
+    hnsActualDuration = (double)REFTIMES_PER_SEC * micInfo->packetLengthCompare / pwfx->nSamplesPerSec;
         
 
     hr = pAudioClient->Reset();
@@ -140,11 +140,9 @@ DWORD WINAPI MicCaptureThread(LPVOID lpParameter)
         // Each loop fills about half of the shared buffer.
         while (bDone == FALSE)
         {
-            // Sleep for half the buffer duration.
-            Sleep(hnsActualDuration / REFTIMES_PER_MILLISEC/2200 );
-
             hr = pCaptureClient->GetNextPacketSize(&packetLength);
             EXIT_ON_ERROR(hr)
+                std::cout << packetLength << std::endl;
 
             //printf("packet size = %d\n", packetLength);
             while (packetLength != 0)

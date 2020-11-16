@@ -1,6 +1,5 @@
 ﻿  ThreadingTest.cpp
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(131,73): warning C4244: '=': conversion from 'double' to 'REFERENCE_TIME', possible loss of data
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(144,60): warning C4244: 'argument': conversion from 'REFERENCE_TIME' to 'DWORD', possible loss of data
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(183,12): warning C4477: 'printf' : format string '%s' requires an argument of type 'char *', but variadic argument 1 has type 'HRESULT'
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(211,28): warning C4101: 'BTCaptureThreadID': unreferenced local variable
+C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(131,81): warning C4244: '=': conversion from 'double' to 'REFERENCE_TIME', possible loss of data
+C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(181,12): warning C4477: 'printf' : format string '%s' requires an argument of type 'char *', but variadic argument 1 has type 'HRESULT'
+C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(209,28): warning C4101: 'BTCaptureThreadID': unreferenced local variable
   Connexounds_DSP_WASAN_Challenge_application1.vcxproj -> C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Debug\Connexounds_DSP_WASAN_Challenge_application1.exe
