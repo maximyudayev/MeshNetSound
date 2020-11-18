@@ -15,13 +15,14 @@
 class AudioBuffer
 {
 	public : 
-		AudioBuffer();
+		AudioBuffer(std::string filename);
 		~AudioBuffer();
 		HRESULT SetFormat(WAVEFORMATEX* pwfx);
 		HRESULT CopyData(BYTE* pData, UINT32 numFramesAvailable, BOOL* bDone);
 
 	private :
 		std::ofstream outputFile;
+		int duration_counter{0};
 
 };
 

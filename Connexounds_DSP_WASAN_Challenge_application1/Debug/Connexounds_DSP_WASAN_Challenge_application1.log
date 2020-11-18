@@ -1,5 +1,2 @@
-﻿  ThreadingTest.cpp
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(131,81): warning C4244: '=': conversion from 'double' to 'REFERENCE_TIME', possible loss of data
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(181,12): warning C4477: 'printf' : format string '%s' requires an argument of type 'char *', but variadic argument 1 has type 'HRESULT'
-C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Connexounds_DSP_WASAN_Challenge_application1\ThreadingTest.cpp(209,28): warning C4101: 'BTCaptureThreadID': unreferenced local variable
+﻿  AudioBuffer.cpp
   Connexounds_DSP_WASAN_Challenge_application1.vcxproj -> C:\Users\Gebruiker\source\repos\Connexounds_DSP_WASAN_Challenge_application1\Debug\Connexounds_DSP_WASAN_Challenge_application1.exe

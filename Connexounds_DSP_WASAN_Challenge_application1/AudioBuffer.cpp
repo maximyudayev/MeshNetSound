@@ -3,15 +3,15 @@
 int blocksize;
 int channels;
 
-AudioBuffer::AudioBuffer() {
+AudioBuffer::AudioBuffer(std::string filename) {
     
-    outputFile.open("MicCapture.txt");
+    outputFile.open(filename);
 
 }
 
 AudioBuffer::~AudioBuffer(){
 
-    outputFile.close();
+    
 }
 /*
  * WAVEFORMATEX: https://docs.microsoft.com/en-us/windows/win32/api/mmeapi/ns-mmeapi-waveformatex
@@ -53,9 +53,12 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx) {
 
 
 HRESULT AudioBuffer::CopyData(BYTE* pData, UINT32 numFramesAvailable, BOOL* bDone) {
-    BYTE data = 0;
-    UINT32 num = 2*numFramesAvailable;
     
+    
+    
+    BYTE data = 0;
+    UINT32 num = channels*numFramesAvailable;
+    duration_counter++;
     
 
     while (num > 0) {
@@ -82,6 +85,13 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, UINT32 numFramesAvailable, BOOL* bDon
         outputFile << fData << std::endl;
     }
 
+
+
+    if (duration_counter >= 1000)
+    {
+        *bDone = true;
+        outputFile.close();
+    }
     
     return 0;
 }
