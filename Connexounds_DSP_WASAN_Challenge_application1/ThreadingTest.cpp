@@ -16,16 +16,10 @@
 #include "AudioBuffer.h"
 using namespace std;
 
-
-
 //--------------------- function prototypes---------------------------------//
 
 IMMDeviceCollection* listAudioEndpoints();
 LPWSTR GetIDpEndpoint(IMMDeviceCollection* pCollection, string device);
-LPWSTR GetIDpEndpoint(IMMDeviceCollection* pCollection, string device);
-
-
-
 
 struct threadInfo
 {
@@ -34,8 +28,8 @@ struct threadInfo
         audiobuffer = buffer;
         pwszID = id;
         packetLengthCompare = length;
-
     }
+
     AudioBuffer* audiobuffer;
     LPWSTR pwszID;
     INT32 packetLengthCompare;
@@ -43,8 +37,7 @@ struct threadInfo
     ~threadInfo() {
         delete(audiobuffer);
     }
-
-} ;
+};
 
 //---------- Windows macro definitions ----------------------------------------------//
 
@@ -64,7 +57,6 @@ const IID IID_IAudioCaptureClient = __uuidof(IAudioCaptureClient);
 
 #pragma comment(lib, "uuid.lib")
 
-
 //----------------------------------------------------------------------------------//
 /*
 
@@ -76,7 +68,7 @@ DWORD WINAPI MicCaptureThread(LPVOID lpParameter)
 
 DWORD WINAPI BTCaptureThread(LPVOID lpParameter)
 {
-  
+
 }
 */
 
@@ -84,22 +76,16 @@ DWORD WINAPI BTCaptureThread(LPVOID lpParameter)
 
 int main(int argc, char* argv[])
 {
-	
+    DWORD MicCaptureThreadID, BTCaptureThreadID;
 
-	DWORD MicCaptureThreadID, BTCaptureThreadID;
-
-    AudioBuffer* micBuffer = new AudioBuffer("Mic capture.txt");
-    AudioBuffer* BTBuffer = new AudioBuffer("Bluetooth capture.txt");
+    AudioBuffer* micBuffer = new AudioBuffer("Mic capture");
+    AudioBuffer* BTBuffer = new AudioBuffer("Bluetooth capture");
 
     IMMDeviceCollection* pCollection = listAudioEndpoints();
 
     LPWSTR pwszIDMic = GetIDpEndpoint(pCollection, "internal microphone");
-    LPWSTR pwszIDBT =  GetIDpEndpoint(pCollection, "Bluetooth headset");
+    LPWSTR pwszIDBT = GetIDpEndpoint(pCollection, "Bluetooth headset");
 
-  
-
-    
-	
     //--------------------------------------------
 
     std::cout << "Starting capture thread" << endl;
@@ -111,16 +97,14 @@ int main(int argc, char* argv[])
     IMMDeviceEnumerator* pEnumerator = NULL;
     IMMDevice* pDeviceMic = NULL, * pDeviceBT = NULL;
     IAudioClient* pAudioClientMic = NULL, * pAudioClientBT = NULL;
-    IAudioCaptureClient* pCaptureClientMic = NULL, *pCaptureClientBT = NULL;
-    WAVEFORMATEX* pwfxMic = NULL, *pwfxBT = NULL;
+    IAudioCaptureClient* pCaptureClientMic = NULL, * pCaptureClientBT = NULL;
+    WAVEFORMATEX* pwfxMic = NULL, * pwfxBT = NULL;
     UINT32 packetLengthMic = 0, packetLengthBT = 0;
     BOOL bDone = FALSE;
-    BYTE* pDataMic, *pDataBT;
+    BYTE* pDataMic, * pDataBT;
     DWORD flagsMic, flagsBT;
     UINT64 DeviceCapturepositionMic = 0, LastDeviceCapturepositionMic = 0;
 
-
-  
     hr = CoInitialize(0);
 
     hr = CoCreateInstance(
@@ -129,7 +113,7 @@ int main(int argc, char* argv[])
         (void**)&pEnumerator);
     EXIT_ON_ERROR(hr)
 
-        // --------  Obtain IMM device from its id + activate both devices as COM objects
+        //--------  Obtain IMM device from its id + activate both devices as COM objects
 
         hr = pEnumerator->GetDevice(pwszIDMic, &pDeviceMic);
     EXIT_ON_ERROR(hr)
@@ -144,7 +128,6 @@ int main(int argc, char* argv[])
         hr = pDeviceBT->Activate(IID_IAudioClient, CLSCTX_ALL,
             NULL, (void**)&pAudioClientBT);
     EXIT_ON_ERROR(hr)
-
 
         //--------- Get format settings for both devices and initialize their client objects
 
@@ -163,9 +146,7 @@ int main(int argc, char* argv[])
             0, hnsRequestedDurationBT,
             0, pwfxBT, NULL);
     EXIT_ON_ERROR(hr)
-        
-        
-        
+
         //-------- Get the size of the allocated buffers and obtain capturing interfaces.
 
         hr = pAudioClientMic->GetBufferSize(&bufferFrameCountMic);
@@ -173,28 +154,25 @@ int main(int argc, char* argv[])
         hr = pAudioClientBT->GetBufferSize(&bufferFrameCountBT);
     EXIT_ON_ERROR(hr)
 
-     
         hr = pAudioClientMic->GetService(IID_IAudioCaptureClient,
             (void**)&pCaptureClientMic);
     EXIT_ON_ERROR(hr)
         printf("The mic buffer size is: %d\n", bufferFrameCountMic);
 
-        hr = pAudioClientBT->GetService(IID_IAudioCaptureClient,
-            (void**)&pCaptureClientBT);
+    hr = pAudioClientBT->GetService(IID_IAudioCaptureClient,
+        (void**)&pCaptureClientBT);
     EXIT_ON_ERROR(hr)
         printf("The BT buffer size is: %d\n", bufferFrameCountBT);
 
-
-
-    // Notify the audio sink which format to use.
-        hr = micBuffer->SetFormat(pwfxMic);
+    //-------- Notify the audio sink which format to use.
+    hr = micBuffer->SetFormat(pwfxMic);
     EXIT_ON_ERROR(hr)
 
         hr = BTBuffer->SetFormat(pwfxBT);
     EXIT_ON_ERROR(hr)
 
-    
-
+        /*micBuffer->SetBufferSize(&bufferFrameCountMic);
+        BTBuffer->SetBufferSize(&bufferFrameCountBT);*/
 
         hr = pAudioClientMic->Reset();
     EXIT_ON_ERROR(hr)
@@ -202,27 +180,23 @@ int main(int argc, char* argv[])
         hr = pAudioClientBT->Reset();
     EXIT_ON_ERROR(hr)
 
-
-        hr = pAudioClientMic->Start();  
-    EXIT_ON_ERROR(hr)
-        hr = pAudioClientBT->Start();  
+        hr = pAudioClientMic->Start();
     EXIT_ON_ERROR(hr)
 
-       
-        while (bDone == FALSE)
+        hr = pAudioClientBT->Start();
+    EXIT_ON_ERROR(hr)
+
+        while (!bDone)
         {
-           
             hr = pCaptureClientMic->GetNextPacketSize(&packetLengthMic);
             EXIT_ON_ERROR(hr)
-            hr = pCaptureClientBT->GetNextPacketSize(&packetLengthBT);
+                hr = pCaptureClientBT->GetNextPacketSize(&packetLengthBT);
             EXIT_ON_ERROR(hr)
 
                 LastDeviceCapturepositionMic = DeviceCapturepositionMic;
-            
-          
-            if (packetLengthBT != 0)
-            {
 
+            if (packetLengthBT > 0)
+            {
                 hr = pCaptureClientBT->GetBuffer(&pDataBT,
                     &numFramesAvailableBT,
                     &flagsBT, NULL, NULL);
@@ -238,68 +212,46 @@ int main(int argc, char* argv[])
 
                     hr = pCaptureClientBT->ReleaseBuffer(numFramesAvailableBT);
                 EXIT_ON_ERROR(hr)
-                    hr = pCaptureClientBT->GetNextPacketSize(&packetLengthBT);
+            }
+
+            if (packetLengthMic > 0)
+            {
+                hr = pCaptureClientMic->GetBuffer(&pDataMic,
+                    &numFramesAvailableMic,
+                    &flagsMic, NULL, NULL);
                 EXIT_ON_ERROR(hr)
 
-
-
-            }
-               
-
-
-            if (packetLengthMic != 0)
+                    if (flagsMic & AUDCLNT_BUFFERFLAGS_SILENT)
                     {
+                        pDataMic = NULL;  // Tell CopyData to write silence.
+                    }
 
-                        // Get the available data in the shared buffer.
-                        hr = pCaptureClientMic->GetBuffer(&pDataMic,
-                            &numFramesAvailableMic,
-                            &flagsMic, &DeviceCapturepositionMic, NULL);
-                        EXIT_ON_ERROR(hr)
+                hr = micBuffer->CopyData(pDataMic, numFramesAvailableMic, &bDone);
+                EXIT_ON_ERROR(hr)
 
-                            /*
-                            printf("jump : %d \n", DeviceCapturepositionMic - LastDeviceCapturepositionMic);
-                            printf("frame size %d \n", packetLengthMic);
+                    hr = pCaptureClientMic->ReleaseBuffer(numFramesAvailableMic);
+                EXIT_ON_ERROR(hr)
+                    // Get the available data in the shared buffer.
+                    /*hr = pCaptureClientMic->GetBuffer(&pDataMic,
+                        &numFramesAvailableMic,
+                        &flagsMic, &DeviceCapturepositionMic, NULL);
+                    EXIT_ON_ERROR(hr)*/
 
-                                 if (flagsMic & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY)
-                                 {
-                                     printf("problem of discontinuity\n");
+                    // Copy the available capture data to the audio sink.
+                      /*  hr = micBuffer->CopyData(pDataMic, numFramesAvailableMic, &bDone);
+                    EXIT_ON_ERROR(hr)
 
-                                 }
-
-
-                                 if (DeviceCapturepositionMic - LastDeviceCapturepositionMic - packetLengthMic != 0)
-                                 {
-
-                                     printf("%d frames dropped\n", DeviceCapturepositionMic - LastDeviceCapturepositionMic - packetLengthMic);
-                                     printf("packet size %d\n", numFramesAvailableMic);
-
-                                 }
-
-                        */
-
-
-                        // Copy the available capture data to the audio sink.
-                            hr = micBuffer->CopyData(pDataMic, numFramesAvailableMic, &bDone);
-                        EXIT_ON_ERROR(hr)
-                            hr = pCaptureClientMic->ReleaseBuffer(numFramesAvailableMic);
-                        EXIT_ON_ERROR(hr)
-                            hr = pCaptureClientMic->GetNextPacketSize(&packetLengthMic);
-                        EXIT_ON_ERROR(hr)
-
-                  }
-
-            
+                        hr = pCaptureClientMic->ReleaseBuffer(numFramesAvailableMic);
+                    EXIT_ON_ERROR(hr)*/
+            }
         }
 
-
-        hr = pAudioClientMic->Stop();  // Stop recording.
+    hr = pAudioClientMic->Stop();  // Stop recording.
     EXIT_ON_ERROR(hr)
         hr = pAudioClientBT->Stop();  // Stop recording.
     EXIT_ON_ERROR(hr)
 
-
-
-    Exit:
+        Exit:
     printf("%s\n", hr);
     CoTaskMemFree(pwfxMic);
     CoTaskMemFree(pwfxBT);
@@ -314,19 +266,14 @@ int main(int argc, char* argv[])
         return hr;
 
     //---------------------------------------------------------------------------------
-    
-
-    
 
     SAFE_RELEASE(pCollection)
-	
 
-	return 0;
+        return 0;
 }
 
-
 IMMDeviceCollection* listAudioEndpoints() {
-    
+
     HRESULT hr = S_OK;
     IMMDeviceEnumerator* pEnumerator = NULL;
     IMMDeviceCollection* pCollection = NULL;
@@ -395,10 +342,8 @@ IMMDeviceCollection* listAudioEndpoints() {
     SAFE_RELEASE(pEnumerator)
         SAFE_RELEASE(pProps)
 
-
         return pCollection;
 }
-
 
 LPWSTR GetIDpEndpoint(IMMDeviceCollection* pCollection, string device) {
     IMMDevice* pEndpoint = NULL;
@@ -406,15 +351,13 @@ LPWSTR GetIDpEndpoint(IMMDeviceCollection* pCollection, string device) {
     HRESULT hr;
     ULONG number;
 
-    std::cout << "Select " << device << " as input device "<< endl;
+    std::cout << "Select " << device << " as input device " << endl;
     std::cin >> number;
 
     hr = pCollection->Item(number, &pEndpoint);
     hr = pEndpoint->GetId(&pwszID);
 
     SAFE_RELEASE(pEndpoint)
-        
 
-   return pwszID;
+        return pwszID;
 }
-
