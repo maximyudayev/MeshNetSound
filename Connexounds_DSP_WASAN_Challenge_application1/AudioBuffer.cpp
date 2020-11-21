@@ -2,34 +2,60 @@
 #include <stdio.h>
 #include <string>
 
+#define FILE_OPEN_ATTEMPTS 5
+
+/// <summary>
+/// AudioBuffer constructor.
+/// </summary>
+/// <param name="filename">
+/// Stores filename used for writing WAV files
+/// </param>
 AudioBuffer::AudioBuffer(std::string filename)
 {
-    file_name = filename;
-    output_file1.open(filename + "1.txt");
-    output_file2.open(filename + "2.txt");
+    sFilename = filename;
 }
 
+/// <summary>
+/// AudioBuffer destructor.
+/// Closes WAV files and frees alloc'ed memory of FILE array and 2D audio buffer array
+/// </summary>
 AudioBuffer::~AudioBuffer()
 {
-    /*for (UINT8 i = 0; i < channels; i++) free(buffer[i]);
-    free(buffer);*/
-    //free(output_files);
+    // Cleans up audio data buffer array
+    for (UINT8 i = 0; i < nChannels; i++) free(dBuffer[i]);
+    free(dBuffer);
+
+    // Cleans up WAV files
+    for (UINT8 i = 0; i < nChannels; i++)
+    {
+        // Gets complete file length
+        fileLength[i] = ftell(outputFiles[i]);
+
+        // Fills missing data chunk size data in the WAV file (Data) headers
+        fseek(outputFiles[i], 64, SEEK_SET); // updates file pointer into the byte identifying data chunk size
+        DWORD dataChunkSize = fileLength[i] - 68;
+        fwrite(&dataChunkSize, sizeof(DWORD), 1, outputFiles[i]);
+
+        // Fills missing file size data in the WAV file (RIFF) headers
+        fseek(outputFiles[i], 4, SEEK_SET); // updates file pointer into the byte identifying file size
+        DWORD fileChunkSize = fileLength[i] - 8;
+        fwrite(&fileChunkSize, sizeof(DWORD), 1, outputFiles[i]);
+
+        // Closes WAV files
+        fclose(outputFiles[i]);
+    }
+    free(outputFiles);
+    free(fileLength);
 }
 
-/*
- * WAVEFORMATEX: https://docs.microsoft.com/en-us/windows/win32/api/mmeapi/ns-mmeapi-waveformatex
- * A structure wich will define the format of the waveform of the audio
- * will give the following data:
- * typedef struct tWAVEFORMATEX {
- *   WORD  wFormatTag;
- *   WORD  nChannels;
- *   DWORD nSamplesPerSec;
- *   DWORD nAvgBytesPerSec;
- *   WORD  nBlockAlign;
- *   WORD  wBitsPerSample;
- *   WORD  cbSize;
- * }
- */
+/// <summary>
+/// Copies WAVEFORMATEX data received from WASAPI for all audio related operations.
+/// </summary>
+/// <param name="pwfx"></param>
+/// <remarks>
+/// WAVEFORMATEX uses 16bit value for channels, hence maximum intrinsic number of virtual channels is 65'536
+/// </remarks>
+/// <returns></returns>
 HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
 {
     std::cout << "samples per second " << pwfx->nSamplesPerSec << '\n';
@@ -38,12 +64,20 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
     std::cout << "bits per sample " << pwfx->wBitsPerSample << '\n';
     std::cout << "extra info size " << pwfx->cbSize << '\n';
 
-    block_sz = pwfx->nBlockAlign;
-    channels = pwfx->nChannels;
-    sample_octet_num = pwfx->wBitsPerSample / 8;
+    nBlockAlign = pwfx->nBlockAlign;
+    nChannels = pwfx->nChannels;
+    wBitsPerSample = pwfx->wBitsPerSample;
+    nBytesInSample = pwfx->wBitsPerSample / 8;
+    wFormatTag = pwfx->wFormatTag;
+    nSamplesPerSec = pwfx->nSamplesPerSec;
+    nAvgBytesPerSec = pwfx->nAvgBytesPerSec;
+    cbSize = pwfx->cbSize;
 
     if (pwfx->cbSize >= 22) {
         WAVEFORMATEXTENSIBLE* waveFormatExtensible = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx);
+        subFormat = waveFormatExtensible->SubFormat;
+        channelMask = waveFormatExtensible->dwChannelMask;
+        wValidBitsPerSample = waveFormatExtensible->Samples.wValidBitsPerSample;
         if (waveFormatExtensible->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) {
             printf("the variable type is a float\n");
         }
@@ -51,56 +85,106 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
             printf("the term is a PCM\n");
         }
     }
-
-    //-------- This part does not want to cooperate. Unable to create an array of files or streams to write data for each independent channel
-   /* char strp[10];
-    output_files = (FILE**)malloc(channels * sizeof(FILE*));
-
-    for (UINT8 i = 0; i < channels; i++) fopen_s(&output_files[i], (file_name + std::to_string(i) + ".txt").c_str(), "w");
-    */
-    return 0;
+    
+    return ERROR_SUCCESS;
 }
 
+/// <summary>
+/// The main audio data decimating method.
+/// Splits original WASAPI stream channelwise and stores decimated data in the buffer variable of the object.
+/// </summary>
+/// <remarks>
+/// Goes over each audio packet only once.
+/// Decimates blocks by offsetting and casting as FLOAT pointers.
+/// </remarks>
+/// <param name="pData"></param>
+/// <param name="numFramesAvailable"></param>
+/// <param name="bDone"></param>
+/// <returns></returns>
 HRESULT AudioBuffer::CopyData(BYTE* pData, UINT32 numFramesAvailable, BOOL* bDone)
 {
-    duration_counter++;
-    buffer_samples_available = numFramesAvailable;
-    FLOAT* tData;
+    durationCounter++;
+    nFramesAvailable = numFramesAvailable;
 
     for (UINT32 j = 0; numFramesAvailable > 0; j++)
     {
-        /*for (UINT8 i = 0; i < channels; i++)
-        {*/
-            tData = (FLOAT*)pData;
-            //buffer[i][j] = *(((FLOAT*)pData) + i);
+        for (UINT8 i = 0; i < nChannels; i++)
+        {
+            dBuffer[i][j] = *(((FLOAT*)pData) + i);
+            fwrite(&dBuffer[i][j], sizeof(FLOAT), 1, outputFiles[i]);
+        }
 
-            output_file1 << *tData << std::endl;
-            output_file2 << *(tData+1) << std::endl;
-        /*}*/
-
-        pData += block_sz;
+        pData += nBlockAlign;
         numFramesAvailable--;
     }
 
-    if (duration_counter >= 1000)
-    {
-        *bDone = TRUE;
-        output_file1.close();
-        output_file2.close();
-        /*for (UINT8 i = 0; i < channels; i++) fclose(output_files[i]);*/
-    }
+    if (durationCounter >= 1000) *bDone = TRUE;
 
-    return 0;
+    return ERROR_SUCCESS;
 }
 
-/*
- * TODO: provide safety in case allocation fails, buffer is not NULL, buffer size is reset by user, etc
- */
+/// <summary>
+/// Allocates an nChannels-by-pSize array for use as data buffer.
+/// Each device channel is a separate row vector. All channels have same buffer and data lengths.
+/// </summary>
+/// <remarks>
+/// For now can be envoked once. In future should be possible to update length on demand.
+/// </remarks>
+/// <param name="pSize"></param>
+/// <returns></returns>
 HRESULT AudioBuffer::SetBufferSize(UINT32* pSize)
 {
-    buffer = (FLOAT**)malloc(channels * sizeof(FLOAT*));
+    dBuffer = (FLOAT**)malloc(nChannels * sizeof(FLOAT*));
 
-    for (UINT8 i = 0; i < channels; i++) buffer[i] = (FLOAT*)malloc(*pSize * sizeof(FLOAT));
+    for (UINT8 i = 0; i < nChannels; i++) dBuffer[i] = (FLOAT*)malloc(*pSize * sizeof(FLOAT));
 
-    return 0;
+    return ERROR_SUCCESS;
+}
+
+/// <summary>
+/// Initializes .WAV file headers for each channel of a device
+/// </summary>
+/// <returns>
+/// ERROR_TOO_MANY_OPEN_FILES if fopen fails for FILE_OPEN_ATTEMPTS times.
+/// ERROR_SUCCESS if WAV file for each channel is properly initialized
+/// </returns>
+HRESULT AudioBuffer::WriteWAV()
+{
+    outputFiles = (FILE**)malloc(nChannels * sizeof(FILE*));
+    fileLength = (DWORD*)malloc(nChannels * sizeof(DWORD));
+
+    WORD ch = 1;
+    DWORD fmtLength = 40;
+    DWORD newAvgBytesPerSec = nAvgBytesPerSec / nChannels;
+    WORD newBlockAlign = nBlockAlign / nChannels;
+
+    for (UINT8 i = 0; i < nChannels; i++)
+    {
+        for (UINT attempts = 0; attempts < FILE_OPEN_ATTEMPTS; attempts++)
+        {
+            outputFiles[i] = fopen((sFilename + std::to_string(i+1) + ".wav").c_str(), "wb");
+
+            if (outputFiles[i] != NULL) break;
+            else if (attempts == FILE_OPEN_ATTEMPTS - 1 && outputFiles[i] == NULL) return ERROR_TOO_MANY_OPEN_FILES;
+        }
+        
+        // RIFF Header
+        fputs("RIFF----WAVEfmt ", outputFiles[i]);
+        // Format-Section
+        fwrite(&fmtLength, sizeof(DWORD), 1, outputFiles[i]);
+        fwrite(&wFormatTag, sizeof(WORD), 1, outputFiles[i]);
+        fwrite(&ch, sizeof(WORD), 1, outputFiles[i]);
+        fwrite(&nSamplesPerSec, sizeof(DWORD), 1, outputFiles[i]);
+        fwrite(&newAvgBytesPerSec, sizeof(DWORD), 1, outputFiles[i]);
+        fwrite(&newBlockAlign, sizeof(WORD), 1, outputFiles[i]);
+        fwrite(&wBitsPerSample, sizeof(WORD), 1, outputFiles[i]);
+        fwrite(&cbSize, sizeof(WORD), 1, outputFiles[i]);
+        fwrite(&wValidBitsPerSample, sizeof(WORD), 1, outputFiles[i]);
+        fwrite(&channelMask, sizeof(DWORD), 1, outputFiles[i]);
+        fwrite(&subFormat, sizeof(GUID), 1, outputFiles[i]);
+        // Data-Section
+        fputs("data----", outputFiles[i]);
+    }
+
+    return ERROR_SUCCESS;
 }

@@ -16,19 +16,27 @@ public:
 	HRESULT SetFormat(WAVEFORMATEX* pwfx);
 	HRESULT CopyData(BYTE* pData, UINT32 numFramesAvailable, BOOL* bDone);
 	HRESULT SetBufferSize(UINT32* pSize);
+	HRESULT WriteWAV();
 
 private:
-	std::ofstream* output_files;
-	std::string file_name;
-
-	std::ofstream output_file1;
-	std::ofstream output_file2;
+	FILE** outputFiles;
+	DWORD* dataSectionOffset;
+	DWORD* fileLength;
+	std::string sFilename;
+	GUID subFormat;
+	DWORD channelMask;
+	WORD wValidBitsPerSample;
 	
-	FLOAT** buffer = NULL;
-	UINT32 buffer_samples_available{ 0 };
-	UINT32 buffer_sz{ 0 };
-	UINT32 duration_counter{ 0 };
-	UINT8 block_sz{ 0 };
-	UINT8 channels{ 0 };
-	UINT8 sample_octet_num{ 0 };
+	FLOAT** dBuffer = NULL;
+	UINT32 nFramesAvailable{ 0 };
+	UINT32 nBufferSize{ 0 };
+	UINT32 durationCounter{ 0 };
+	WORD nBlockAlign{ 0 };
+	WORD nChannels{ 0 };
+	WORD nBytesInSample{ 0 };
+	WORD wFormatTag{ 0 };
+	WORD wBitsPerSample{ 0 };
+	WORD cbSize{ 0 };
+	DWORD nSamplesPerSec{ 0 };
+	DWORD nAvgBytesPerSec{ 0 };
 };
