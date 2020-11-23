@@ -20,6 +20,7 @@ using namespace std;
 
 IMMDeviceCollection* listAudioEndpoints();
 LPWSTR GetIDpEndpoint(IMMDeviceCollection* pCollection, string device);
+DWORD gcd(DWORD a, DWORD b);
 
 struct threadInfo
 {
@@ -43,6 +44,12 @@ struct threadInfo
 
 #define REFTIMES_PER_SEC  10000000
 #define REFTIMES_PER_MILLISEC  10000
+#define ENDPOINT_TIMEOUT_MILLISEC 2000
+#define NUM_ENDPOINTS 2
+
+// In the future must be ideally made into dynamic controls or a CLI arguments
+#define DSP_BUFFER_LEN 2048
+#define DSP_SAMPLE_FREQ 44100
 
 #define EXIT_ON_ERROR(hres)  \
               if (FAILED(hres)) { goto Exit; }
@@ -74,9 +81,17 @@ DWORD WINAPI BTCaptureThread(LPVOID lpParameter)
 
 //--------MAIN THREAD--------------------------------------------------------------------//
 
+/// <summary>
+/// <para>Entrypoint of the program.</para>
+/// <para>TODO: remove duplicate code, facilitate arbitrary device number connection.</para>
+/// </summary>
+/// <param name="argc"></param>
+/// <param name="argv"></param>
+/// <returns></returns>
 int main(int argc, char* argv[])
 {
     DWORD MicCaptureThreadID, BTCaptureThreadID;
+    HANDLE hEvent[NUM_ENDPOINTS];
 
     AudioBuffer* micBuffer = new AudioBuffer("Mic capture");
     AudioBuffer* BTBuffer = new AudioBuffer("BT capture");
@@ -89,7 +104,6 @@ int main(int argc, char* argv[])
     std::cout << "Starting capture thread" << endl;
     HRESULT hr;
     REFERENCE_TIME hnsRequestedDurationMic = REFTIMES_PER_SEC, hnsRequestedDurationBT = REFTIMES_PER_SEC;
-    REFERENCE_TIME hnsActualDurationMic, hnsActualDurationBT;
     UINT32 bufferFrameCountMic, bufferFrameCountBT;
     UINT32 numFramesAvailableMic, numFramesAvailableBT;
     IMMDeviceEnumerator* pEnumerator = NULL;
@@ -101,7 +115,8 @@ int main(int argc, char* argv[])
     BOOL bDone = FALSE;
     BYTE* pDataMic, * pDataBT;
     DWORD flagsMic, flagsBT;
-    UINT64 DeviceCapturepositionMic = 0, LastDeviceCapturepositionMic = 0;
+    DWORD nUpsampleMic, nDownsampleMic, nUpsampleBT, nDownsampleBT;
+    DWORD gcdMic, gcdMicDiv, gcdMicTFreqDiv, gcdBT, gcdBTDiv, gcdBTTFreqDiv;
 
     hr = CoInitialize(0);
 
@@ -126,24 +141,90 @@ int main(int argc, char* argv[])
             NULL, (void**)&pAudioClientBT);
         EXIT_ON_ERROR(hr)
 
-    //--------- Get format settings for both devices and initialize their client objects
+    //-------- Get format settings for both devices and initialize their client objects
     hr = pAudioClientMic->GetMixFormat(&pwfxMic);
         EXIT_ON_ERROR(hr)
-
+    
     hr = pAudioClientBT->GetMixFormat(&pwfxBT);
         EXIT_ON_ERROR(hr)
 
+    //-------- Calculate the period of each AudioClient buffer based on user's desired DSP buffer length
+    gcdMic = gcd(pwfxMic->nSamplesPerSec, DSP_SAMPLE_FREQ);
+    gcdBT = gcd(pwfxBT->nSamplesPerSec, DSP_SAMPLE_FREQ);
+
+    gcdMicDiv = pwfxMic->nSamplesPerSec / gcdMic;
+    gcdMicTFreqDiv = DSP_SAMPLE_FREQ / gcdMic;
+
+    gcdBTDiv = pwfxBT->nSamplesPerSec / gcdBT;
+    gcdBTTFreqDiv = DSP_SAMPLE_FREQ / gcdBT;
+    
+    if (pwfxMic->nSamplesPerSec < DSP_SAMPLE_FREQ)
+    {
+        nUpsampleMic = max(gcdMicDiv, gcdMicTFreqDiv);
+        nDownsampleMic = min(gcdMicDiv, gcdMicTFreqDiv);
+    }
+    else if (pwfxMic->nSamplesPerSec > DSP_SAMPLE_FREQ)
+    {
+        nUpsampleMic = min(gcdMicDiv, gcdMicTFreqDiv);
+        nDownsampleMic = max(gcdMicDiv, gcdMicTFreqDiv);
+    }
+    else
+    {
+        nUpsampleMic = 1;
+        nDownsampleMic = 1;
+    }
+
+    if (pwfxBT->nSamplesPerSec < DSP_SAMPLE_FREQ)
+    {
+        nUpsampleBT = max(gcdBTDiv, gcdBTTFreqDiv);
+        nDownsampleBT = min(gcdBTDiv, gcdBTTFreqDiv);
+    }
+    else if (pwfxBT->nSamplesPerSec > DSP_SAMPLE_FREQ)
+    {
+        nUpsampleBT = min(gcdBTDiv, gcdBTTFreqDiv);
+        nDownsampleBT = max(gcdBTDiv, gcdBTTFreqDiv);
+    }
+    else 
+    {
+        nUpsampleBT = 1;
+        nDownsampleBT = 1;
+    }
+
+    // Optional logic if user wants to have DSP buffer of fixed length
+    //hnsRequestedDurationMic = DSP_BUFFER_LEN * nDownsampleMic / nUpsampleMic / pwfxMic->nSamplesPerSec * REFTIMES_PER_SEC;
+    //hnsRequestedDurationBT = DSP_BUFFER_LEN * nDownsampleBT / nUpsampleBT / pwfxBT->nSamplesPerSec * REFTIMES_PER_SEC;
+
+    //-------- Initialize streams to operate in callback mode
     hr = pAudioClientMic->Initialize(AUDCLNT_SHAREMODE_SHARED,
-            0, hnsRequestedDurationMic,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsRequestedDurationMic,
             0, pwfxMic, NULL);
         EXIT_ON_ERROR(hr)
-
+    
     hr = pAudioClientBT->Initialize(AUDCLNT_SHAREMODE_SHARED,
-            0, hnsRequestedDurationBT,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsRequestedDurationBT,
             0, pwfxBT, NULL);
         EXIT_ON_ERROR(hr)
 
-    //-------- Get the size of the allocated buffers and obtain capturing interfaces.
+    //-------- Create event handles and register for buffer-event notifications
+    for (UINT8 i = 0; i < NUM_ENDPOINTS; i++)
+    {
+        hEvent[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+        // Terminate the program if handle creation failed
+        if (hEvent[i] == NULL)
+        {
+            hr = E_FAIL;
+            goto Exit;
+        }
+    }
+    
+    hr = pAudioClientMic->SetEventHandle(hEvent[0]);
+        EXIT_ON_ERROR(hr)
+    
+    hr = pAudioClientBT->SetEventHandle(hEvent[1]);
+        EXIT_ON_ERROR(hr)
+
+    //-------- Get the size of the actual allocated buffers and obtain capturing interfaces
     hr = pAudioClientMic->GetBufferSize(&bufferFrameCountMic);
         EXIT_ON_ERROR(hr)
 
@@ -151,28 +232,31 @@ int main(int argc, char* argv[])
         EXIT_ON_ERROR(hr)
 
     hr = pAudioClientMic->GetService(IID_IAudioCaptureClient, 
-            (void**)&pCaptureClientMic);
+                                    (void**)&pCaptureClientMic);
         EXIT_ON_ERROR(hr)
     printf("The mic buffer size is: %d\n", bufferFrameCountMic);
 
     hr = pAudioClientBT->GetService(IID_IAudioCaptureClient, 
-            (void**)&pCaptureClientBT);
+                                    (void**)&pCaptureClientBT);
         EXIT_ON_ERROR(hr)
     printf("The BT buffer size is: %d\n", bufferFrameCountBT);
 
-        //-------- Notify the audio sink which format to use.
+    //-------- Notify the audio sink which format to use
     hr = micBuffer->SetFormat(pwfxMic);
         EXIT_ON_ERROR(hr)
 
     hr = BTBuffer->SetFormat(pwfxBT);
         EXIT_ON_ERROR(hr)
 
+    //-------- Set data structure size for channelwise audio storage
     micBuffer->SetBufferSize(&bufferFrameCountMic);
     BTBuffer->SetBufferSize(&bufferFrameCountBT);
 
+    //-------- Write captured data into a WAV file for debugging
     micBuffer->WriteWAV();
     BTBuffer->WriteWAV();
 
+    //-------- Reset and start capturing
     hr = pAudioClientMic->Reset();
         EXIT_ON_ERROR(hr)
 
@@ -184,60 +268,43 @@ int main(int argc, char* argv[])
 
     hr = pAudioClientBT->Start();
         EXIT_ON_ERROR(hr)
-
+    
+    // Captures endpoint buffer data in an event-based fashion
+    // In next revisions, abstract from the number of endpoints to avoid duplication of logic below
     while (!bDone)
     {
-        hr = pCaptureClientMic->GetNextPacketSize(&packetLengthMic);
-            EXIT_ON_ERROR(hr)
-        hr = pCaptureClientBT->GetNextPacketSize(&packetLengthBT);
-            EXIT_ON_ERROR(hr)
+        // Wait for the buffer fill event to trigger for both endpoints or until timeout
+        DWORD retval = WaitForMultipleObjects(NUM_ENDPOINTS, hEvent, TRUE, ENDPOINT_TIMEOUT_MILLISEC);
 
-        LastDeviceCapturepositionMic = DeviceCapturepositionMic;
 
-        if (packetLengthBT > 0)
-        {
-            hr = pCaptureClientBT->GetBuffer(&pDataBT,
-                &numFramesAvailableBT,
-                &flagsBT, NULL, NULL);
-                EXIT_ON_ERROR(hr)
-
-            if (flagsBT & AUDCLNT_BUFFERFLAGS_SILENT) pDataBT = NULL;  // Tell CopyData to write silence.
-
-            hr = BTBuffer->CopyData(pDataBT, numFramesAvailableBT, &bDone);
-                EXIT_ON_ERROR(hr)
-
-            hr = pCaptureClientBT->ReleaseBuffer(numFramesAvailableBT);
-                EXIT_ON_ERROR(hr)
-        }
-
-        if (packetLengthMic > 0)
-        {
-            hr = pCaptureClientMic->GetBuffer(&pDataMic,
-                &numFramesAvailableMic,
-                &flagsMic, NULL, NULL);
-                EXIT_ON_ERROR(hr)
-
-            if (flagsMic & AUDCLNT_BUFFERFLAGS_SILENT) pDataMic = NULL;  // Tell CopyData to write silence.
-
-            hr = micBuffer->CopyData(pDataMic, numFramesAvailableMic, &bDone);
-                EXIT_ON_ERROR(hr)
-
-            hr = pCaptureClientMic->ReleaseBuffer(numFramesAvailableMic);
-                EXIT_ON_ERROR(hr)
-            
-            // Get the available data in the shared buffer.
-            /*hr = pCaptureClientMic->GetBuffer(&pDataMic,
-                &numFramesAvailableMic,
-                &flagsMic, &DeviceCapturepositionMic, NULL);
-            EXIT_ON_ERROR(hr)*/
-
-            // Copy the available capture data to the audio sink.
-                /*  hr = micBuffer->CopyData(pDataMic, numFramesAvailableMic, &bDone);
+        // Capture of mic data
+        hr = pCaptureClientMic->GetBuffer(&pDataMic,
+                                        &bufferFrameCountMic,
+                                        &flagsMic, NULL, NULL);
             EXIT_ON_ERROR(hr)
 
-                hr = pCaptureClientMic->ReleaseBuffer(numFramesAvailableMic);
-            EXIT_ON_ERROR(hr)*/
-        }
+        if (flagsMic & AUDCLNT_BUFFERFLAGS_SILENT) pDataMic = NULL;  // Tell CopyData to write silence.
+
+        hr = micBuffer->CopyData(pDataMic, bufferFrameCountMic, &bDone);
+            EXIT_ON_ERROR(hr)
+
+        hr = pCaptureClientMic->ReleaseBuffer(bufferFrameCountMic);
+            EXIT_ON_ERROR(hr)
+
+
+        // Capture of BT data
+        hr = pCaptureClientBT->GetBuffer(&pDataBT,
+                                        &bufferFrameCountBT,
+                                        &flagsBT, NULL, NULL);
+            EXIT_ON_ERROR(hr)
+
+        if (flagsBT & AUDCLNT_BUFFERFLAGS_SILENT) pDataBT = NULL;  // Tell CopyData to write silence.
+
+        hr = BTBuffer->CopyData(pDataBT, bufferFrameCountBT, &bDone);
+            EXIT_ON_ERROR(hr)
+
+        hr = pCaptureClientBT->ReleaseBuffer(bufferFrameCountBT);
+            EXIT_ON_ERROR(hr)
     }
 
     hr = pAudioClientMic->Stop();  // Stop recording.
@@ -250,6 +317,8 @@ int main(int argc, char* argv[])
 
     Exit:
     printf("%d\n", hr);
+    for (UINT8 i = 0; i < NUM_ENDPOINTS; i++)
+        if (hEvent[i] != NULL) CloseHandle(hEvent[i]);
     CoTaskMemFree(pwfxMic);
     CoTaskMemFree(pwfxBT);
         SAFE_RELEASE(pEnumerator)
@@ -360,4 +429,16 @@ LPWSTR GetIDpEndpoint(IMMDeviceCollection* pCollection, string device)
         SAFE_RELEASE(pEndpoint)
 
     return pwszID;
+}
+
+/// <summary>
+/// <para>Finds Greatest Common Divisor of two integers.</para>
+/// </summary>
+/// <param name="a">- first integer</param>
+/// <param name="b">- second integer</param>
+/// <returns>The greatest common devisor of "a" and "b"</returns>
+DWORD gcd(DWORD a, DWORD b)
+{
+    if (b == 0) return a;
+    return gcd(b, a % b);
 }
