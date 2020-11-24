@@ -64,6 +64,9 @@ class AudioBuffer
 		// Endpoint buffer related variables
 		ENDPOINTFMT tEndpointFmt;
 
+		UINT32 nChannelOffset;
+		static UINT32 nNewChannelOffset;
+
 #ifdef DEBUG
 		UINT32 durationCounter{ 0 };
 #endif // DEBUG

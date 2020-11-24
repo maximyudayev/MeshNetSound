@@ -3,6 +3,13 @@
 #include <string>
 
 /// <summary>
+/// <para>Static class member variable.</para>
+/// <para>Keeps track of the number of instances created and is useful
+/// for objects to know their order of indices.</para>
+/// </summary>
+UINT32 AudioBuffer::nNewChannelOffset{ 0 };
+
+/// <summary>
 /// <para>AudioBuffer constructor.</para>
 /// <para>Calling thread must call AudioBuffer::SetFormat() and AudioBuffer::InitBuffer()
 /// before using any other functionality of the class.</para>
@@ -98,6 +105,9 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
 
 /// <summary>
 /// <para>Initializes stream resample properties and endpoint buffer size.</para>
+/// <para>Note: currently not thread-safe since AudioBuffer::nNextChannelOffset
+/// does not yet have a mutex. Each AudioBuffer should call InitBuffer sequentially
+/// in order to properly setup circular buffer channel offsets for each channel.</para>
 /// <para>TODO: make possible to update endpoint buffer length on demand.</para>
 /// </summary>
 /// <param name="nEndpointBufferSize">- length of endpoint buffer per channel</param>
@@ -119,6 +129,11 @@ HRESULT AudioBuffer::InitBuffer(UINT32 nEndpointBufferSize, FLOAT** pCircularBuf
     tResampleFmt.nBufferOffset = 0;
     tResampleFmt.nUpsample = nUpsample;
     tResampleFmt.nDownsample = nDownsample;
+
+    // Indicate to this AudioBuffer instance its absolute buffer channel position
+    nChannelOffset = AudioBuffer::nNewChannelOffset;
+    // Update the new channel position for the next Class member
+    AudioBuffer::nNewChannelOffset += tEndpointFmt.nChannels;
 
     return ERROR_SUCCESS;
 }
@@ -212,13 +227,13 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
         // Set upsampled number of frames in the circular buffer to 0
         for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
         {
-            memset(tResampleFmt.pBuffer[i] + tResampleFmt.nBufferOffset, 0, sizeof(FLOAT) * tEndpointFmt.nBufferSize * tResampleFmt.nUpsample);
+            memset(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 0, sizeof(FLOAT) * tEndpointFmt.nBufferSize * tResampleFmt.nUpsample);
             
             // If AUDCLNT_BUFFERFLAGS_SILENT is set and capturing WAV files, write silence to file 
             // (takes first tEndpointFmt.nBufferSize 0's from newly cleared tResampleFmt.pBuffer[i] chunk)
             // Will never overflow result of memset
             if (pData == NULL && bOutputWAV) 
-                fwrite(tResampleFmt.pBuffer[i] + tResampleFmt.nBufferOffset, sizeof(FLOAT), tEndpointFmt.nBufferSize, outputFiles[i]);
+                fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, sizeof(FLOAT), tEndpointFmt.nBufferSize, outputFiles[i]);
         }
     }
     // If the new upsampled packet overruns the length of the contigious block of memory, go circularly
@@ -229,9 +244,9 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
         for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
         {
             // Set al frames until the end of circular buffer to 0
-            memset(tResampleFmt.pBuffer[i] + tResampleFmt.nBufferOffset, 0, sizeof(FLOAT) * (tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset));
+            memset(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 0, sizeof(FLOAT) * (tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset));
             // Set the next remaining number of frames at the beginning of the circular buffer to 0
-            memset(tResampleFmt.pBuffer[i], 0, sizeof(FLOAT) * ((tResampleFmt.nBufferOffset + tEndpointFmt.nBufferSize * tResampleFmt.nUpsample) % tResampleFmt.nBufferSize));
+            memset(tResampleFmt.pBuffer[nChannelOffset + i], 0, sizeof(FLOAT) * ((tResampleFmt.nBufferOffset + tEndpointFmt.nBufferSize * tResampleFmt.nUpsample) % tResampleFmt.nBufferSize));
 
             // If AUDCLNT_BUFFERFLAGS_SILENT is set and capturing WAV files, write silence to file 
             // (takes first tEndpointFmt.nBufferSize 0's from newly cleared tResampleFmt.pBuffer[i] chunk)
@@ -239,18 +254,18 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
             if (pData == NULL && bOutputWAV)
             {
                 if (tResampleFmt.nBufferOffset + tEndpointFmt.nBufferSize <= tResampleFmt.nBufferSize)
-                    fwrite(tResampleFmt.pBuffer[i] + tResampleFmt.nBufferOffset,
+                    fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
                         sizeof(FLOAT), 
                         tEndpointFmt.nBufferSize, 
                         outputFiles[i]);
                 else
                 {
-                    fwrite(tResampleFmt.pBuffer[i] + tResampleFmt.nBufferOffset, 
+                    fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
                         sizeof(FLOAT), 
                         tEndpointFmt.nBufferSize - tEndpointFmt.nBufferSize % (tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset), 
                         outputFiles[i]);
                     
-                    fwrite(tResampleFmt.pBuffer[i],
+                    fwrite(tResampleFmt.pBuffer[nChannelOffset + i],
                         sizeof(FLOAT),
                         tEndpointFmt.nBufferSize % (tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset),
                         outputFiles[i]);
@@ -269,7 +284,7 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
         {
             for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
             {
-                *(tResampleFmt.pBuffer[i] + (tResampleFmt.nBufferOffset + tResampleFmt.nUpsample * j) % tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
+                *(tResampleFmt.pBuffer[nChannelOffset + i] + (tResampleFmt.nBufferOffset + tResampleFmt.nUpsample * j) % tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
                 
                 if (bOutputWAV) fwrite(((FLOAT*)pData) + i, sizeof(FLOAT), 1, outputFiles[i]);
             }
