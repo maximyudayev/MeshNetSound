@@ -105,6 +105,7 @@ int main(int argc, char* argv[])
     BYTE*                   pData[NUM_ENDPOINTS]                = { NULL };
 
     UINT32                  nEndpointBufferSize[NUM_ENDPOINTS]  = { 0 },
+                            nEndpointPackets[NUM_ENDPOINTS]     = { 0 },
                             nAggregatedChannels                 = 0,
                             nCircularBufferSize                 = AGGREGATOR_CIRCULAR_BUFFER_SIZE;
 
@@ -169,33 +170,35 @@ int main(int argc, char* argv[])
     }
 
     //-------- Initialize streams to operate in callback mode
+    // Allow WASAPI to choose endpoint buffer size, glitches otherwise
+    // for both, event-driven and polling methods, outputs 448 frames for mic
     for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
     {
         hr = pAudioClient[i]->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                        AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 0,
+                                        0, 0,
                                         0, pwfx[i], NULL);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Create event handles and register for buffer-event notifications
-    for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
-    {
-        hEvent[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
+    //for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
+    //{
+    //    hEvent[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
 
-        // Terminate the program if handle creation failed
-        if (hEvent[i] == NULL)
-        {
-            hr = E_FAIL;
-            goto Exit;
-        }
-    }
+    //    // Terminate the program if handle creation failed
+    //    if (hEvent[i] == NULL)
+    //    {
+    //        hr = E_FAIL;
+    //        goto Exit;
+    //    }
+    //}
 
-    //-------- Set buffer filled event handle
-    for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
-    {
-        hr = pAudioClient[i]->SetEventHandle(hEvent[i]);
-            EXIT_ON_ERROR(hr)
-    }
+    ////-------- Set buffer filled event handle
+    //for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
+    //{
+    //    hr = pAudioClient[i]->SetEventHandle(hEvent[i]);
+    //        EXIT_ON_ERROR(hr)
+    //}
 
     //-------- Get the size of the actual allocated buffers and obtain capturing interfaces
     for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
@@ -272,29 +275,38 @@ int main(int argc, char* argv[])
             EXIT_ON_ERROR(hr)
     }
     
+    cout << "starting capture" << endl;
+
     // Captures endpoint buffer data in an event-based fashion
     // In next revisions, abstract from the number of endpoints to avoid duplication of logic below
     while (!bDone)
     {
         // Wait for the buffer fill event to trigger for both endpoints or until timeout
-        DWORD retval = WaitForMultipleObjects(NUM_ENDPOINTS, hEvent, TRUE, ENDPOINT_TIMEOUT_MILLISEC);
-        
+        /*DWORD retval = WaitForMultipleObjects(NUM_ENDPOINTS, hEvent, TRUE, ENDPOINT_TIMEOUT_MILLISEC);*/
+
         // Capture data from all devices
         // TODO: split between multiple threads/cores
         for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
         {
-            hr = pCaptureClient[i]->GetBuffer(&pData[i],
-                                            &nEndpointBufferSize[i],
-                                            &flags[i], NULL, NULL);
-                EXIT_ON_ERROR(hr)
-                   
-            if (flags[i] & AUDCLNT_BUFFERFLAGS_SILENT) pData[i] = NULL;  // Tell CopyData to write silence.
-                
-            hr = audioBuffer[i]->CopyData(pData[i], &bDone);
+            hr = pCaptureClient[i]->GetNextPacketSize(&nEndpointPackets[i]);
                 EXIT_ON_ERROR(hr)
 
-            hr = pCaptureClient[i]->ReleaseBuffer(nEndpointBufferSize[i]);
-                EXIT_ON_ERROR(hr)
+            if (nEndpointPackets[i] > 0)
+            {
+                hr = pCaptureClient[i]->GetBuffer(&pData[i],
+                                                &nEndpointBufferSize[i],
+                                                &flags[i], NULL, NULL);
+                    EXIT_ON_ERROR(hr)
+
+                if (flags[i] & AUDCLNT_BUFFERFLAGS_SILENT) 
+                    pData[i] = NULL;  // Tell CopyData to write silence.
+
+                hr = audioBuffer[i]->CopyData(pData[i], &bDone);
+                    EXIT_ON_ERROR(hr)
+
+                hr = pCaptureClient[i]->ReleaseBuffer(nEndpointBufferSize[i]);
+                    EXIT_ON_ERROR(hr)
+            }
         }
     }
     
@@ -311,8 +323,8 @@ int main(int argc, char* argv[])
     printf("%d\n", hr);
     for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
     {
-        if (hEvent[i] != NULL)
-            CloseHandle(hEvent[i]);
+        /*if (hEvent[i] != NULL)
+            CloseHandle(hEvent[i]);*/
 
         CoTaskMemFree(pwfx[i]);
         SAFE_RELEASE(pDevice[i])

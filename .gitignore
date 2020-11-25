@@ -1,0 +1,4 @@
+# ignore Debug directory
+[Dd]ebug/
+.vs/
+x64/
