@@ -17,6 +17,6 @@
 #define NUM_ENDPOINTS 2                         // number of currently connected arbitrary capture devices
 
 #define AGGREGATOR_SAMPLE_FREQ 44100            // sampling frequency of circular buffer for DSP consumption
-#define AGGREGATOR_CIRCULAR_BUFFER_SIZE 2       // number of endpoint buffer sized packets to fit
+#define AGGREGATOR_CIRCULAR_BUFFER_SIZE 44100   // number of endpoint buffer sized packets to fit
 
 #define DEBUG                                   // flag aiding in automatic exit after 10s

@@ -84,7 +84,7 @@ int main(int argc, char* argv[])
     AudioBuffer*            audioBuffer[]                       = { new AudioBuffer("Mic capture"), 
                                                                     new AudioBuffer("BT capture") };
 
-    FLOAT**                 pBuffer                             = NULL;
+    FLOAT**                 pCircularBuffer                     = NULL;
 
     IMMDeviceCollection*    pCollection                         = listAudioEndpoints();
 
@@ -93,9 +93,6 @@ int main(int argc, char* argv[])
     
     HRESULT                 hr;
     HANDLE                  hEvent[NUM_ENDPOINTS];
-
-    REFERENCE_TIME          hnsRequestedDuration[NUM_ENDPOINTS] = { ENDPOINT_BUFFER_PERIOD_MILLISEC * REFTIMES_PER_MILLISEC,
-                                                                    ENDPOINT_BUFFER_PERIOD_MILLISEC * REFTIMES_PER_MILLISEC };
 
     IMMDeviceEnumerator*    pEnumerator                         = NULL;
     IMMDevice*              pDevice[NUM_ENDPOINTS]              = { NULL };
@@ -107,10 +104,9 @@ int main(int argc, char* argv[])
     
     BYTE*                   pData[NUM_ENDPOINTS]                = { NULL };
 
-    UINT32                  bufferFrameCount[NUM_ENDPOINTS]     = { 0 },
-                            numFramesAvailable[NUM_ENDPOINTS]   = { 0 },
-                            packetLength[NUM_ENDPOINTS]         = { 0 },
-                            nAggregatedChannels                 = 0;
+    UINT32                  nEndpointBufferSize[NUM_ENDPOINTS]  = { 0 },
+                            nAggregatedChannels                 = 0,
+                            nCircularBufferSize                 = AGGREGATOR_CIRCULAR_BUFFER_SIZE;
 
     DWORD                   flags[NUM_ENDPOINTS],
                             nUpsample[NUM_ENDPOINTS], 
@@ -176,13 +172,13 @@ int main(int argc, char* argv[])
     for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
     {
         hr = pAudioClient[i]->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                        AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsRequestedDuration[i],
+                                        AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 0,
                                         0, pwfx[i], NULL);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Create event handles and register for buffer-event notifications
-    for (UINT8 i = 0; i < NUM_ENDPOINTS; i++)
+    for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
     {
         hEvent[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
 
@@ -204,13 +200,13 @@ int main(int argc, char* argv[])
     //-------- Get the size of the actual allocated buffers and obtain capturing interfaces
     for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
     {
-        hr = pAudioClient[i]->GetBufferSize(&bufferFrameCount[i]);
+        hr = pAudioClient[i]->GetBufferSize(&nEndpointBufferSize[i]);
             EXIT_ON_ERROR(hr)
         
         hr = pAudioClient[i]->GetService(IID_IAudioCaptureClient,
                                         (void**)&pCaptureClient[i]);
             EXIT_ON_ERROR(hr)
-        printf("The %d-th buffer size is: %d\n", i, bufferFrameCount[i]);
+        printf("The %d-th buffer size is: %d\n", i, nEndpointBufferSize[i]);
     }
 
     //-------- Notify the audio sink which format to use
@@ -223,33 +219,38 @@ int main(int argc, char* argv[])
     //-------- Set data structure size for channelwise audio storage
     for (UINT32 i = 0; i < NUM_ENDPOINTS; i++) nAggregatedChannels += pwfx[i]->nChannels;
     
-    pBuffer = (FLOAT**)malloc(nAggregatedChannels * sizeof(FLOAT*));
-    if (pBuffer == NULL)
+    pCircularBuffer = (FLOAT**)malloc(nAggregatedChannels * sizeof(FLOAT*));
+    if (pCircularBuffer == NULL)
     {
         hr = ENOMEM;
         goto Exit;
     }
+#ifdef DEBUG
+    memset(pCircularBuffer, 1, nAggregatedChannels * sizeof(FLOAT*));
+#endif
 
     for (UINT32 i = 0; i < nAggregatedChannels; i++)
     {
-        pBuffer[i] = (FLOAT*)malloc(AGGREGATOR_SAMPLE_FREQ * AGGREGATOR_CIRCULAR_BUFFER_SIZE * ENDPOINT_BUFFER_PERIOD_MILLISEC / 1000 * sizeof(FLOAT));
-        if (pBuffer[i] == NULL)
+        pCircularBuffer[i] = (FLOAT*)malloc(nCircularBufferSize * sizeof(FLOAT));
+        if (pCircularBuffer[i] == NULL)
         {
             for (UINT32 i = 0; i < nAggregatedChannels; i++)
-                if (pBuffer[i] != NULL) free(pBuffer[i]);
+                if (pCircularBuffer[i] != NULL) free(pCircularBuffer[i]);
 
-            free(pBuffer);
+            free(pCircularBuffer);
 
             hr = ENOMEM;
             goto Exit;
         }
-        memset(pBuffer[i], 0, AGGREGATOR_SAMPLE_FREQ * AGGREGATOR_CIRCULAR_BUFFER_SIZE * ENDPOINT_BUFFER_PERIOD_MILLISEC / 1000 * sizeof(FLOAT));
+#ifdef DEBUG
+        memset(pCircularBuffer[i], 1, nCircularBufferSize * sizeof(FLOAT));
+#endif
     }
 
-    for (UINT32 i = 0, j = 0; j < nAggregatedChannels; j += pwfx[i]->nChannels, i++)
+    for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
     {
-        hr = audioBuffer[i]->InitBuffer(bufferFrameCount[i], pBuffer,
-                                    AGGREGATOR_SAMPLE_FREQ * AGGREGATOR_CIRCULAR_BUFFER_SIZE * ENDPOINT_BUFFER_PERIOD_MILLISEC / 1000,
+        hr = audioBuffer[i]->InitBuffer(&nEndpointBufferSize[i], pCircularBuffer,
+                                    &nCircularBufferSize,
                                     nUpsample[i], nDownsample[i]);
             EXIT_ON_ERROR(hr)
     }
@@ -283,16 +284,16 @@ int main(int argc, char* argv[])
         for (UINT32 i = 0; i < NUM_ENDPOINTS; i++)
         {
             hr = pCaptureClient[i]->GetBuffer(&pData[i],
-                                            &bufferFrameCount[i],
+                                            &nEndpointBufferSize[i],
                                             &flags[i], NULL, NULL);
                 EXIT_ON_ERROR(hr)
-
+                   
             if (flags[i] & AUDCLNT_BUFFERFLAGS_SILENT) pData[i] = NULL;  // Tell CopyData to write silence.
-
+                
             hr = audioBuffer[i]->CopyData(pData[i], &bDone);
                 EXIT_ON_ERROR(hr)
 
-            hr = pCaptureClient[i]->ReleaseBuffer(bufferFrameCount[i]);
+            hr = pCaptureClient[i]->ReleaseBuffer(nEndpointBufferSize[i]);
                 EXIT_ON_ERROR(hr)
         }
     }
@@ -323,10 +324,10 @@ int main(int argc, char* argv[])
     SAFE_RELEASE(pCollection)
     
     for (UINT32 i = 0; i < nAggregatedChannels; i++)
-        if (pBuffer[i] != NULL) 
-            free(pBuffer[i]);
+        if (pCircularBuffer[i] != NULL) 
+            free(pCircularBuffer[i]);
 
-    if (pBuffer != NULL) free(pBuffer);
+    if (pCircularBuffer != NULL) free(pCircularBuffer);
 
     return hr;
 }

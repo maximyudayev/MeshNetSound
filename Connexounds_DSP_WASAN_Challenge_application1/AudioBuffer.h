@@ -12,13 +12,13 @@
 typedef struct resamplefmt {
 	FLOAT** pBuffer;
 	UINT32 nBufferOffset;
-	UINT32 nBufferSize;
+	UINT32* nBufferSize; 
 	DWORD nUpsample;
 	DWORD nDownsample;
 } RESAMPLEFMT;
 
 typedef struct endpointfmt {
-	UINT32 nBufferSize;
+	UINT32* nBufferSize; // not fixed because number of frames is dictated by WASAPI due to AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY
 	WORD nBlockAlign;
 	WORD nChannels;
 	WORD wBitsPerSample;
@@ -38,8 +38,8 @@ class AudioBuffer
 		AudioBuffer(std::string filename);
 		~AudioBuffer();
 		HRESULT SetFormat(WAVEFORMATEX* pwfx);
-		HRESULT InitBuffer(UINT32 nEndpointBufferSize, FLOAT** pCircularBuffer, 
-							UINT32 nCircularBufferSize, DWORD nUpsample, DWORD nDownsample);
+		HRESULT InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBuffer, 
+							UINT32* nCircularBufferSize, DWORD nUpsample, DWORD nDownsample);
 		HRESULT InitWAV();
 		HRESULT CopyData(BYTE* pData, BOOL* bDone);
 
