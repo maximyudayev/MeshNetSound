@@ -1,22 +1,25 @@
 /*
     TODO: 
         I. support dynamic updates to the aggregator like:
-            1. Addition of capture devices
-            2. Sample-rate conversion
-            3. 
-        II. verify all memory is released and free'd properly after refactoring and encapsulation
-        III. multithread the aggregator so that each thread is responsible for eacg set of functionality
-            a. Control lane for communication with JUCE/DSP
-            b. Capture and pre-processing of data
+            1. Addition/removal of capture devices.
+            2. Sample-rate conversion.
+            3. Output channel mask changes.
+            4. Circular buffer size.
+        II. multithread the aggregator so that each thread is responsible for each set of functionality:
+            a. Control lane for communication with JUCE/DSP.
+            b. Capture and pre-processing of data.
+        III. convert class into a thread-safe Singleton.
+        IV. facilitate modularity for cross-platform portability.
+        V. provide better device friendly names (i.e Max's Airpods, etc.)
 */
 
 #include "Aggregator.h"
 
 //---------- Windows macro definitions ----------------------------------------------//
-static const CLSID     CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
-static const IID       IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
-static const IID       IID_IAudioClient = __uuidof(IAudioClient);
-static const IID       IID_IAudioCaptureClient = __uuidof(IAudioCaptureClient);
+static const CLSID     CLSID_MMDeviceEnumerator     = __uuidof(MMDeviceEnumerator);
+static const IID       IID_IMMDeviceEnumerator      = __uuidof(IMMDeviceEnumerator);
+static const IID       IID_IAudioClient             = __uuidof(IAudioClient);
+static const IID       IID_IAudioCaptureClient      = __uuidof(IAudioCaptureClient);
 
 //#pragma comment(lib, "uuid.lib")
 
@@ -24,22 +27,11 @@ static const IID       IID_IAudioCaptureClient = __uuidof(IAudioCaptureClient);
 /// <para>Aggregator constructor.</para>
 /// <para>High level, clean interface to perform all the cumbersome setup
 /// and negotiation with WASAPI, user parameters, etc.</para>
+/// <para>Note: not thread-safe, must be instantiated only once.</para>
+/// <para>TODO: convert class into a thread-safe Singleton.</para>
 /// </summary>
 Aggregator::Aggregator()
 {
-    HRESULT hr = S_OK;
-
-    hr = CoInitialize(0);
-
-    hr = CoCreateInstance(
-            CLSID_MMDeviceEnumerator, NULL,
-            CLSCTX_ALL, IID_IMMDeviceEnumerator,
-            (void**)&pEnumerator);
-        EXIT_ON_ERROR(hr);
-
-    hr = GetUserCaptureDevices();
-    
-    Exit:
     
 }
 
@@ -49,57 +41,109 @@ Aggregator::Aggregator()
 /// </summary>
 Aggregator::~Aggregator()
 {
-    // Release memory alloc'ed by Windows for capture device interfaces
-    for (UINT32 i = 0; i < nAllCaptureEndpoints; i++)
-        SAFE_RELEASE(pCaptureDeviceAll[i])
+    //-------- Release memory alloc'ed by Windows for capture device interfaces
+    // Release each capture device interface
+    if (pCaptureDeviceAll != NULL)
+        for (UINT32 i = 0; i < nAllCaptureDevices; i++) 
+            SAFE_RELEASE(pCaptureDeviceAll[i])
+    
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
+    {
+        CoTaskMemFree(pwfx[i]);
+        SAFE_RELEASE(pAudioClient[i])
+        SAFE_RELEASE(pCaptureClient[i])
+    }
+    
+    CoTaskMemFree(pCollection);
+    SAFE_RELEASE(pEnumerator)
 
-    // Release memory alloc'ed by Aggregator for capture device arrays
-    free(pCaptureDeviceAll);
-    free(pCaptureDevice);
+    //-------- Release memory alloc'ed by Aggregator
+    // Destruct AudioBuffer objects and gracefully wrap up their work
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
+        pAudioBuffer[i]->~AudioBuffer();
 
-//Exit:
-//    printf("%d\n", hr);
-//    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
-//    {
-//        CoTaskMemFree(pwfx[i]);
-//        SAFE_RELEASE(pCaptureDevice[i])
-//            SAFE_RELEASE(pAudioClient[i])
-//            SAFE_RELEASE(pCaptureClient[i])
-//    }
-//
-//    SAFE_RELEASE(pEnumerator)
-//
-//        for (UINT32 i = 0; i < nAggregatedChannels; i++)
-//            if (pCircularBuffer[i] != NULL)
-//                free(pCircularBuffer[i]);
-//
-//    if (pCircularBuffer != NULL) free(pCircularBuffer);
+    // Release memory alloc'ed for ring buffer
+    if (pCircularBuffer != NULL)
+    {
+        for (UINT32 i = 0; i < nAggregatedChannels; i++)
+            if (pCircularBuffer[i] != NULL)
+                free(pCircularBuffer[i]);
+
+        free(pCircularBuffer);
+    }
+    // Set number of aggregated channels back to 0
+    nAggregatedChannels = 0;
+
+    // Free dynamic arrays holding reference to all these variables as last step
+    if (pCaptureDeviceAll != NULL)      free(pCaptureDeviceAll);
+    if (pCaptureDevice != NULL)         free(pCaptureDevice);
+    if (pAudioClient != NULL)           free(pAudioClient);
+    if (pCaptureClient != NULL)         free(pCaptureClient);
+    if (pAudioBuffer != NULL)           free(pAudioBuffer);
+    if (pData != NULL)                  free(pData);
+    if (pwfx != NULL)                   free(pwfx);
+    if (nGCD != NULL)                   free(nGCD);
+    if (nGCDDiv != NULL)                free(nGCDDiv);
+    if (nGCDTFreqDiv != NULL)           free(nGCDTFreqDiv);
+    if (nUpsample != NULL)              free(nUpsample);
+    if (nDownsample != NULL)            free(nDownsample);
+    if (nEndpointBufferSize != NULL)    free(nEndpointBufferSize);
+    if (nEndpointPackets != NULL)       free(nEndpointPackets);
+    if (flags != NULL)                  free(flags);
 }
 
 /// <summary>
-/// <para></para>
-/// <para>TODO:</para>
-/// <para>TODO:</para>
+/// <para>Alloc's memory and instantiates WASAPI interface
+/// to stream capture device data.</para>
 /// </summary>
 /// <returns></returns>
 HRESULT Aggregator::Initialize()
 {
     HRESULT hr = S_OK;
+    UINT32 attempt = 0;
 
-    pAudioClient        = (IAudioClient**)malloc(nCaptureEndpoints * sizeof(IAudioClient*));
-    pwfx                = (WAVEFORMATEX**)malloc(nCaptureEndpoints * sizeof(WAVEFORMATEX*));
-    pAudioBuffer        = (AudioBuffer**)malloc(nCaptureEndpoints * sizeof(AudioBuffer*));
-    pCaptureClient      = (IAudioCaptureClient**)malloc(nCaptureEndpoints * sizeof(IAudioCaptureClient*));
-    pData               = (BYTE**)malloc(nCaptureEndpoints * sizeof(BYTE*));
-    nGCD                = (DWORD*)malloc(nCaptureEndpoints * sizeof(DWORD));
-    nGCDDiv             = (DWORD*)malloc(nCaptureEndpoints * sizeof(DWORD));
-    nGCDTFreqDiv        = (DWORD*)malloc(nCaptureEndpoints * sizeof(DWORD));
-    nUpsample           = (DWORD*)malloc(nCaptureEndpoints * sizeof(DWORD));
-    nDownsample         = (DWORD*)malloc(nCaptureEndpoints * sizeof(DWORD));
-    flags               = (DWORD*)malloc(nCaptureEndpoints * sizeof(DWORD));
-    nEndpointBufferSize = (UINT32*)malloc(nCaptureEndpoints * sizeof(UINT32));
-    nEndpointPackets    = (UINT32*)malloc(nCaptureEndpoints * sizeof(UINT32));
+    //-------- Initialize Aggregator basics
+    hr = CoInitialize(0);
+        EXIT_ON_ERROR(hr)
+    
+    //-------- Instantiate IMMDevice Enumerator
+    hr = CoCreateInstance(
+            CLSID_MMDeviceEnumerator, NULL,
+            CLSCTX_ALL, IID_IMMDeviceEnumerator,
+            (void**)&pEnumerator);
+        EXIT_ON_ERROR(hr)
+    
+    //-------- Try to list all available capture devices AGGREGATOR_OP_ATTEMPTS times
+    do
+    {
+        hr = ListCaptureDevices();
+    } while (hr != S_OK && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+        EXIT_ON_ERROR(hr)
 
+    //-------- Try to get user choice of capture devices AGGREGATOR_OP_ATTEMPTS times
+    attempt = 0; // don't forget to reset the number of attempts
+    do
+    {
+        hr = GetUserCaptureDevices();
+    } while (hr != S_OK && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+        EXIT_ON_ERROR(hr)
+    
+    //-------- Use information obtained from user inputs to dynamically create the system
+    pAudioClient        = (IAudioClient**)malloc(nCaptureDevices * sizeof(IAudioClient*));
+    pwfx                = (WAVEFORMATEX**)malloc(nCaptureDevices * sizeof(WAVEFORMATEX*));
+    pAudioBuffer        = (AudioBuffer**)malloc(nCaptureDevices * sizeof(AudioBuffer*));
+    pCaptureClient      = (IAudioCaptureClient**)malloc(nCaptureDevices * sizeof(IAudioCaptureClient*));
+    pData               = (BYTE**)malloc(nCaptureDevices * sizeof(BYTE*));
+    nGCD                = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
+    nGCDDiv             = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
+    nGCDTFreqDiv        = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
+    nUpsample           = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
+    nDownsample         = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
+    flags               = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
+    nEndpointBufferSize = (UINT32*)malloc(nCaptureDevices * sizeof(UINT32));
+    nEndpointPackets    = (UINT32*)malloc(nCaptureDevices * sizeof(UINT32));
+
+    //-------- Check if allocation of any of the crucial variables failed, clean up and return with ENOMEM otherwise
     if (pAudioClient == NULL ||
         pCaptureClient == NULL ||
         pAudioBuffer == NULL ||
@@ -114,44 +158,27 @@ HRESULT Aggregator::Initialize()
         nEndpointPackets == NULL ||
         flags == NULL)
     {
-        if (pAudioClient != NULL) free(pAudioClient);
-        if (pCaptureClient != NULL) free(pCaptureClient);
-        if (pAudioBuffer != NULL) free(pAudioBuffer);
-        if (pData != NULL) free(pData);
-        if (pwfx != NULL) free(pwfx);
-        if (nGCD != NULL) free(nGCD);
-        if (nGCDDiv != NULL) free(nGCDDiv);
-        if (nGCDTFreqDiv != NULL) free(nGCDTFreqDiv);
-        if (nUpsample != NULL) free(nUpsample);
-        if (nDownsample != NULL) free(nDownsample);
-        if (nEndpointBufferSize != NULL) free(nEndpointBufferSize);
-        if (nEndpointPackets != NULL) free(nEndpointPackets);
-        if (flags != NULL) free(flags);
-        
         hr = ENOMEM;
         goto Exit;
     }
 
     //-------- Activate capture devices as COM objects
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
-        /*hr = pEnumerator->GetDevice(pwszID[i], &pCaptureDevice[i]);
-            EXIT_ON_ERROR(hr)*/
-
         hr = pCaptureDevice[i]->Activate(IID_IAudioClient, CLSCTX_ALL,
                                     NULL, (void**)&pAudioClient[i]);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Get format settings for both devices and initialize their client objects
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioClient[i]->GetMixFormat(&pwfx[i]);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Calculate the period of each AudioClient buffer based on user's desired DSP buffer length
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         nGCD[i] = gcd(pwfx[i]->nSamplesPerSec, AGGREGATOR_SAMPLE_FREQ);
 
@@ -178,7 +205,7 @@ HRESULT Aggregator::Initialize()
     //-------- Initialize streams to operate in callback mode
     // Allow WASAPI to choose endpoint buffer size, glitches otherwise
     // for both, event-driven and polling methods, outputs 448 frames for mic
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioClient[i]->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                         0, 0,
@@ -186,8 +213,10 @@ HRESULT Aggregator::Initialize()
             EXIT_ON_ERROR(hr)
     }
 
+    std::cout << "<--------Capture Device Details-------->" << std::endl << std::endl;
+
     //-------- Get the size of the actual allocated buffers and obtain capturing interfaces
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioClient[i]->GetBufferSize(&nEndpointBufferSize[i]);
             EXIT_ON_ERROR(hr)
@@ -195,22 +224,22 @@ HRESULT Aggregator::Initialize()
         hr = pAudioClient[i]->GetService(IID_IAudioCaptureClient,
                                         (void**)&pCaptureClient[i]);
             EXIT_ON_ERROR(hr)
-        printf("The %d-th buffer size is: %d\n", i, nEndpointBufferSize[i]);
+        printf("[%d]:\nThe %d-th buffer size is: %d\n", i, i, nEndpointBufferSize[i]);
     }
 
     //-------- Instantiate AudioBuffer object for each user-chosen capture device
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
-        pAudioBuffer[i] = new AudioBuffer("Device " + i);
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
+        pAudioBuffer[i] = new AudioBuffer("Device " + std::to_string(i) + " ");
 
     //-------- Notify the audio sink which format to use
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioBuffer[i]->SetFormat(pwfx[i]);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Set data structure size for channelwise audio storage
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++) nAggregatedChannels += pwfx[i]->nChannels;
+    for (UINT32 i = 0; i < nCaptureDevices; i++) nAggregatedChannels += pwfx[i]->nChannels;
     
     pCircularBuffer = (FLOAT**)malloc(nAggregatedChannels * sizeof(FLOAT*));
     if (pCircularBuffer == NULL)
@@ -227,11 +256,6 @@ HRESULT Aggregator::Initialize()
         pCircularBuffer[i] = (FLOAT*)malloc(nCircularBufferSize * sizeof(FLOAT));
         if (pCircularBuffer[i] == NULL)
         {
-            for (UINT32 i = 0; i < nAggregatedChannels; i++)
-                if (pCircularBuffer[i] != NULL) free(pCircularBuffer[i]);
-
-            free(pCircularBuffer);
-
             hr = ENOMEM;
             goto Exit;
         }
@@ -240,7 +264,8 @@ HRESULT Aggregator::Initialize()
 #endif
     }
 
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    //-------- Initialize AudioBuffer objects' buffers using the obtained information
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioBuffer[i]->InitBuffer(&nEndpointBufferSize[i], pCircularBuffer,
                                     &nCircularBufferSize,
@@ -249,13 +274,55 @@ HRESULT Aggregator::Initialize()
     }
 
     //-------- Write captured data into a WAV file for debugging
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioBuffer[i]->InitWAV();
             EXIT_ON_ERROR(hr)
     }
 
+    //-------- If initialization succeeded, return with S_OK
+    return hr;
+
+    //-------- If initialization failed at any of above steps, clean up memory prior to next attempt
     Exit:
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
+    {
+        CoTaskMemFree(pwfx[i]);
+        SAFE_RELEASE(pAudioClient[i])
+        SAFE_RELEASE(pCaptureClient[i])
+
+        pAudioBuffer[i]->~AudioBuffer();
+    }
+
+    // Free circular buffer
+    if (pCircularBuffer != NULL)
+    {
+        for (UINT32 i = 0; i < nAggregatedChannels; i++)
+            if (pCircularBuffer[i] != NULL)
+                free(pCircularBuffer[i]);
+
+        free(pCircularBuffer);
+    }
+    // Set number of aggregated channels back to 0
+    nAggregatedChannels = 0;
+
+    // Free dynamic arrays holding reference to 
+    if (pAudioClient != NULL)           free(pAudioClient);
+    if (pCaptureClient != NULL)         free(pCaptureClient);
+    if (pAudioBuffer != NULL)           free(pAudioBuffer);
+    if (pData != NULL)                  free(pData);
+    if (pwfx != NULL)                   free(pwfx);
+    if (nGCD != NULL)                   free(nGCD);
+    if (nGCDDiv != NULL)                free(nGCDDiv);
+    if (nGCDTFreqDiv != NULL)           free(nGCDTFreqDiv);
+    if (nUpsample != NULL)              free(nUpsample);
+    if (nDownsample != NULL)            free(nDownsample);
+    if (nEndpointBufferSize != NULL)    free(nEndpointBufferSize);
+    if (nEndpointPackets != NULL)       free(nEndpointPackets);
+    if (flags != NULL)                  free(flags);
+
+    SAFE_RELEASE(pEnumerator)
+
     return hr;
 }
 
@@ -269,8 +336,8 @@ HRESULT Aggregator::Start()
 {
     HRESULT hr = S_OK;
 
-    //-------- Reset and start capturing
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    //-------- Reset and start capturing on all selected devices
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioClient[i]->Reset();
             EXIT_ON_ERROR(hr)
@@ -279,13 +346,13 @@ HRESULT Aggregator::Start()
             EXIT_ON_ERROR(hr)
     }
     
-    std::cout << "starting capture" << std::endl;
+    std::cout << MSG "Starting audio capture." << std::endl;
 
     //-------- Capture endpoint buffer data in a poll-based fashion
     while (!bDone)
     {
         // Captures data from all devices
-        for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+        for (UINT32 i = 0; i < nCaptureDevices; i++)
         {
             hr = pCaptureClient[i]->GetNextPacketSize(&nEndpointPackets[i]);
                 EXIT_ON_ERROR(hr)
@@ -314,7 +381,9 @@ HRESULT Aggregator::Start()
 }
 
 /// <summary>
-/// 
+/// <para>Flags to each AudioBuffer to not request new frames from WASAPI
+/// and stops each WASAPI stream.</para>
+/// <para>Note: not thread-safe. Must add mutex on bDone.</para>
 /// </summary>
 /// <returns></returns>
 HRESULT Aggregator::Stop()
@@ -322,14 +391,12 @@ HRESULT Aggregator::Stop()
     HRESULT hr = S_OK;
     bDone = TRUE;
 
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+    for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioClient[i]->Stop();  // Stop recording.
             EXIT_ON_ERROR(hr)
     }
-    
-    for (UINT32 i = 0; i < nCaptureEndpoints; i++)
-        pAudioBuffer[i]->~AudioBuffer();
+    std::cout << MSG "Stopped audio capture." << std::endl;
     
     Exit:
     return hr;
@@ -346,44 +413,38 @@ HRESULT Aggregator::Stop()
 /// <para>IMMDevice/IMMDeviceCollection/IMMDeviceEnumerator/IPropertyStore
 /// specific error otherwise.</para>
 /// </returns>
-HRESULT Aggregator::ListCaptureEndpoints()
+HRESULT Aggregator::ListCaptureDevices()
 {  
     HRESULT hr = S_OK;
-    UINT32 nCount;
-    LPWSTR pwszID;
-    IPropertyStore* pProps;
+    LPWSTR pwszID = NULL;
+    IPropertyStore* pProps = NULL;
     PROPVARIANT varName;
-    PROPERTYKEY key;
-    GUID IDevice_FriendlyName = { 0xa45c254e, 0xdf1c, 0x4efd, { 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0 } };
-    key.pid = 14;
-    key.fmtid = IDevice_FriendlyName;
 
     //-------- Enumerate capture endpoints
     hr = pEnumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &pCollection);
         EXIT_ON_ERROR(hr)
     
     //-------- Count the number of available devices
-    hr = pCollection->GetCount(&nCount);
+    hr = pCollection->GetCount(&nAllCaptureDevices);
         EXIT_ON_ERROR(hr)
     
-    if (nCount == 0)
+    if (nAllCaptureDevices == 0)
     {
-        printf("No capture endpoints were detected\n");
+        printf(MSG "No capture endpoints were detected\n");
         hr = RPC_S_NO_ENDPOINT_FOUND;
         goto Exit;
     }
     
-    //-------- Alloc memory for the first capture device pointer
-    nAllCaptureEndpoints = 1;
-    pCaptureDeviceAll = (IMMDevice**)malloc(sizeof(IMMDevice*));
+    //-------- Alloc memory for all the capture devices
+    pCaptureDeviceAll = (IMMDevice**)malloc(nAllCaptureDevices * sizeof(IMMDevice*));
     if (pCaptureDeviceAll == NULL)
     {
         hr = ENOMEM;
         goto Exit;
     }
 
-    //-------- Go through the capture device list
-    for (UINT32 i = 0; i < nCount; i++)
+    //-------- Go through the capture device list, output to console and save reference to each device
+    for (UINT32 i = 0; i < nAllCaptureDevices; i++)
     {
         // Get next device from the list
         hr = pCollection->Item(i, &pCaptureDeviceAll[i]);
@@ -393,48 +454,44 @@ HRESULT Aggregator::ListCaptureEndpoints()
         hr = pCaptureDeviceAll[i]->GetId(&pwszID);
             EXIT_ON_ERROR(hr)
 
-        // Get the device's properties
+        // Get the device's properties in read-only mode
         hr = pCaptureDeviceAll[i]->OpenPropertyStore(STGM_READ, &pProps);
             EXIT_ON_ERROR(hr)
         
         // Initialize container for property value
         PropVariantInit(&varName);
-
+        
         // Get the endpoint's friendly-name property
-        hr = pProps->GetValue(key, &varName);
+        hr = pProps->GetValue(PKEY_Device_FriendlyName, &varName);
             EXIT_ON_ERROR(hr)
 
         // Print endpoint friendly name and endpoint ID
-        printf("Endpoint %d: \"%S\" (%S)\n", i, varName.pwszVal, pwszID);
-
-        // If there is another capture device after this one, alloc more memory
-        if (i < nCount - 1)
-        {
-            IMMDevice** dummy = (IMMDevice**)realloc(pCaptureDeviceAll, ++nAllCaptureEndpoints * sizeof(IMMDevice*));
-            if (dummy == NULL)
-            {
-                free(pCaptureDeviceAll);
-                PropVariantClear(&varName);
-
-                hr = ENOMEM;
-                goto Exit;
-            }
-            else
-                pCaptureDeviceAll = dummy;
-        }
+        printf("Capture Device #%d: \"%S\" (%S)\n", i, varName.pwszVal, pwszID);
 
         // Release memory alloc'ed by Windows before next loop iteration
         CoTaskMemFree(pwszID);
         PropVariantClear(&varName);
-            SAFE_RELEASE(pProps)
+        SAFE_RELEASE(pProps)
     }
+    std::cout << std::endl;
 
+    //-------- If listing devices succeeded, return with S_OK
     return hr;
 
+    //-------- If listing devices failed at any step, clean up memory before next attempt
     Exit:
+    if (pCaptureDeviceAll != NULL)
+    {
+        for (UINT32 i = 0; i < nAllCaptureDevices; i++)
+            SAFE_RELEASE(pCaptureDeviceAll[i])
+
+        free(pCaptureDeviceAll);
+    }
+
     CoTaskMemFree(pwszID);
+    PropVariantClear(&varName);
     CoTaskMemFree(pCollection);
-        SAFE_RELEASE(pProps)
+    SAFE_RELEASE(pProps)
 
     return hr;
 }
@@ -442,7 +499,7 @@ HRESULT Aggregator::ListCaptureEndpoints()
 /// <summary>
 /// <para>Prompts user to choose from devices available to the system.</para>
 /// <para>Must be called after Aggregator::ListCaptureDevices.</para>
-/// <para>TODO: incorporate more user input sanitization.</para>
+/// <para>TODO: incorporate more user input verification.</para>
 /// </summary>
 /// <returns></returns>
 HRESULT Aggregator::GetUserCaptureDevices()
@@ -452,27 +509,36 @@ HRESULT Aggregator::GetUserCaptureDevices()
     BOOL bInSet, bUserDone = bInSet = FALSE;
     CHAR sInput[11]; // Char array for UINT32 (10 digit number) + \n
     
-    IMMDevice** pCaptureDevice = (IMMDevice**)malloc(sizeof(IMMDevice*));
+    //-------- Allocate memory for the first user-chosen capture device
+    pCaptureDevice = (IMMDevice**)malloc(sizeof(IMMDevice*));
     if (pCaptureDevice == NULL)
     {
         hr = ENOMEM;
         return hr;
     }
 
-    std::cout << "Select all desired out of available " << nAllCaptureEndpoints << " input devices." << std::endl;
+    std::cout << MSG "Select all desired out of available " << nAllCaptureDevices << " input devices." << std::endl;
     
     //-------- Prompt user to select an input device until they indicate they are done or until no more devices are left
-    while (!bUserDone || nCaptureEndpoints < nAllCaptureEndpoints)
+    while (!bUserDone && nCaptureDevices < nAllCaptureDevices)
     {
-        std::cout << "Choose next input device (#" << nCaptureEndpoints << ") or press [ENTER] to proceed." << std::endl;
+        std::cout   << MSG "Choose next input device (currently selected " 
+                    << nCaptureDevices << " devices) or press [ENTER] to proceed." 
+                    << std::endl;
+
         std::cin.get(sInput, 11);
-        
+        std::string str(sInput);
+
+        // Skip cin to next line to accept another input on next loop iteration
+        std::cin.clear();
+        std::cin.ignore(11, '\n');
+
         // If user chose at least 1 device and pressed ENTER
-        if (sInput == "\n" && nCaptureEndpoints > 0) break;
+        if (str.length() == 0 && nCaptureDevices > 0) break;
         // If user attempts to proceed without choosing single device
-        else if (sInput == "\n" && nCaptureEndpoints == 0)
+        else if (str.length() == 0 && nCaptureDevices == 0)
         {
-            std::cout << "You must choose at least 1 capture device." << std::endl;
+            std::cout << WARN "You must choose at least 1 capture device." << std::endl;
             continue;
         }
         // If user entered a number
@@ -483,14 +549,14 @@ HRESULT Aggregator::GetUserCaptureDevices()
             bInSet = FALSE;
             
             // Check if user input a number within the range of available device indices
-            if (nUserChoice < 0 || nUserChoice > nAllCaptureEndpoints - 1)
+            if (nUserChoice < 0 || nUserChoice > nAllCaptureDevices - 1)
             {
-                std::cout << "You must pick one of existing devices, a number between 0 and " << nAllCaptureEndpoints - 1 << std::endl;
+                std::cout << WARN "You must pick one of existing devices, a number between 0 and " << nAllCaptureDevices - 1 << std::endl;
                 continue;
             }
 
             // Check if user already chose this device
-            for (UINT32 i = 0; i < nCaptureEndpoints; i++)
+            for (UINT32 i = 0; i < nCaptureDevices; i++)
             {
                 bInSet = pCaptureDevice[i] == pCaptureDeviceAll[nUserChoice];
                 if (bInSet) break;
@@ -499,13 +565,13 @@ HRESULT Aggregator::GetUserCaptureDevices()
             // Check if this device is already chosen
             if (bInSet)
             {
-                std::cout << "You cannot choose the same device more than once." << std::endl;
+                std::cout << WARN "You cannot choose the same device more than once." << std::endl;
                 continue;
             }
             // If all is good, add the device into the list of devices to use for aggregator
             else
             {
-                IMMDevice** dummy = (IMMDevice**)realloc(pCaptureDevice, ++nCaptureEndpoints * sizeof(IMMDevice*));
+                IMMDevice** dummy = (IMMDevice**)realloc(pCaptureDevice, ++nCaptureDevices * sizeof(IMMDevice*));
                 if (dummy == NULL)
                 {
                     free(pCaptureDevice);
@@ -515,11 +581,12 @@ HRESULT Aggregator::GetUserCaptureDevices()
                 else
                 {
                     pCaptureDevice = dummy;
-                    pCaptureDevice[nCaptureEndpoints] = pCaptureDeviceAll[nUserChoice];
+                    pCaptureDevice[nCaptureDevices - 1] = pCaptureDeviceAll[nUserChoice];
                 }
             }
         }
     }
+    std::cout << MSG << nCaptureDevices << " devices selected." << std::endl << std::endl;
 
     Exit:
     return hr;

@@ -97,11 +97,11 @@ AudioBuffer::~AudioBuffer()
 /// <returns>ERROR_SUCCESS</returns>
 HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
 {
-    std::cout << "samples per second " << pwfx->nSamplesPerSec << '\n';
-    std::cout << "amount of channels " << pwfx->nChannels << '\n';
-    std::cout << "block allignment " << pwfx->nBlockAlign << '\n';
-    std::cout << "bits per sample " << pwfx->wBitsPerSample << '\n';
-    std::cout << "extra info size " << pwfx->cbSize << '\n';
+    std::cout << "Samples per second: " << pwfx->nSamplesPerSec << '\n';
+    std::cout << "Number of channels: " << pwfx->nChannels << '\n';
+    std::cout << "Block alignment: " << pwfx->nBlockAlign << '\n';
+    std::cout << "Bits per sample: " << pwfx->wBitsPerSample << '\n';
+    std::cout << "Extra info size: " << pwfx->cbSize << '\n';
     
     tEndpointFmt.nBlockAlign = pwfx->nBlockAlign;
     tEndpointFmt.nChannels = pwfx->nChannels;
@@ -118,8 +118,8 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
         tEndpointFmt.channelMask = waveFormatExtensible->dwChannelMask;
         tEndpointFmt.wValidBitsPerSample = waveFormatExtensible->Samples.wValidBitsPerSample;
 
-        if (waveFormatExtensible->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) printf("the variable type is a float\n");
-        else if (waveFormatExtensible->SubFormat == KSDATAFORMAT_SUBTYPE_PCM) printf("the term is a PCM\n");
+        if (waveFormatExtensible->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) printf("Variable type is: float\n\n");
+        else if (waveFormatExtensible->SubFormat == KSDATAFORMAT_SUBTYPE_PCM) printf("Variable type is: PCM\n\n");
     }
     
     return ERROR_SUCCESS;

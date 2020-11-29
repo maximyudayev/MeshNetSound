@@ -19,22 +19,10 @@
     <Filter Include="Source Files\libresample">
       <UniqueIdentifier>{b87570fd-f153-4d40-9b6e-58fd9ae6253a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Resource Files\Audio Files">
-      <UniqueIdentifier>{b115567b-3b43-4393-89e5-1b3f0b3597ce}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioBuffer.cpp">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="libresample\src\resamplesubs.c">
-      <Filter>Source Files\libresample</Filter>
-    </ClCompile>
-    <ClCompile Include="libresample\src\resample.c">
-      <Filter>Source Files\libresample</Filter>
-    </ClCompile>
-    <ClCompile Include="libresample\src\filterkit.c">
-      <Filter>Source Files\libresample</Filter>
     </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
@@ -53,28 +41,5 @@
     <ClInclude Include="config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="libresample\src\filterkit.h">
-      <Filter>Header Files\libresample</Filter>
-    </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <Media Include="Audio Files\BT capture1 - Event-Driven.wav">
-      <Filter>Resource Files\Audio Files</Filter>
-    </Media>
-    <Media Include="Audio Files\BT capture1.wav">
-      <Filter>Resource Files\Audio Files</Filter>
-    </Media>
-    <Media Include="Audio Files\Mic capture1 - Event-Driven.wav">
-      <Filter>Resource Files\Audio Files</Filter>
-    </Media>
-    <Media Include="Audio Files\Mic capture1.wav">
-      <Filter>Resource Files\Audio Files</Filter>
-    </Media>
-    <Media Include="Audio Files\Mic capture2 - Event-Driven.wav">
-      <Filter>Resource Files\Audio Files</Filter>
-    </Media>
-    <Media Include="Audio Files\Mic capture2.wav">
-      <Filter>Resource Files\Audio Files</Filter>
-    </Media>
   </ItemGroup>
 </Project>

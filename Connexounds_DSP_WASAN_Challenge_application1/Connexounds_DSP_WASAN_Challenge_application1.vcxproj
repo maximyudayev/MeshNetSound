@@ -140,24 +140,12 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="AudioBuffer.cpp" />
-    <ClCompile Include="libresample\src\filterkit.c" />
-    <ClCompile Include="libresample\src\resample.c" />
-    <ClCompile Include="libresample\src\resamplesubs.c" />
     <ClCompile Include="Aggregator.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Aggregator.h" />
     <ClInclude Include="AudioBuffer.h" />
     <ClInclude Include="config.h" />
-    <ClInclude Include="libresample\src\filterkit.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Media Include="Audio Files\BT capture1 - Event-Driven.wav" />
-    <Media Include="Audio Files\BT capture1.wav" />
-    <Media Include="Audio Files\Mic capture1 - Event-Driven.wav" />
-    <Media Include="Audio Files\Mic capture1.wav" />
-    <Media Include="Audio Files\Mic capture2 - Event-Driven.wav" />
-    <Media Include="Audio Files\Mic capture2.wav" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

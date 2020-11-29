@@ -20,11 +20,17 @@ int main(int argc, char* argv[])
                                                              )" << std::endl;
 
 	// 
-	std::cout << "<--------Starting Aggregator-------->" << std::endl;
+	std::cout << "<--------Starting Aggregator-------->" << std::endl << std::endl;
 
 	Aggregator* pAggregator = new Aggregator();
-
-	hr = pAggregator->Start();
 	
+	hr = pAggregator->Initialize();
+	
+	hr = pAggregator->Start();
+
+#ifndef DEBUG
 	//hr = pAggregator->Stop();
+#endif
+
+	return hr;
 }

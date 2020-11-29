@@ -75,7 +75,7 @@ void *resample_open(int highQuality, double minFactor, double maxFactor)
    double *Imp64;
    double Rolloff, Beta;
    rsdata *hp;
-   UWORD   Xoff_min, Xoff_max;
+   UWORD Xoff_min, Xoff_max;
    int i;
 
    /* Just exit if we get invalid factors */
@@ -124,11 +124,11 @@ void *resample_open(int highQuality, double minFactor, double maxFactor)
    hp->ImpD[hp->Nwing-1] = - hp->Imp[hp->Nwing-1];
 
    free(Imp64);
-
+   
    /* Calc reach of LP filter wing (plus some creeping room) */
-   Xoff_min = ((hp->Nmult+1)/2.0) * MAX(1.0, 1.0/minFactor) + 10;
-   Xoff_max = ((hp->Nmult+1)/2.0) * MAX(1.0, 1.0/maxFactor) + 10;
-   hp->Xoff = MAX(Xoff_min, Xoff_max);
+   Xoff_min = ((hp->Nmult+1)/2.0) * max(1.0, 1.0/minFactor) + 10;
+   Xoff_max = ((hp->Nmult+1)/2.0) * max(1.0, 1.0/maxFactor) + 10;
+   hp->Xoff = max(Xoff_min, Xoff_max);
 
    /* Make the inBuffer size at least 4096, but larger if necessary
       in order to store the minimum reach of the LP filter and then some.
