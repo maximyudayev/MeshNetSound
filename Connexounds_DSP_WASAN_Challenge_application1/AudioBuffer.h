@@ -3,10 +3,11 @@
 #include <iostream>
 #include <fstream>
 #include <mmsystem.h>
-#include <MMDeviceAPI.h>
 #include <AudioClient.h>
 #include <AudioPolicy.h>
 #include <mmreg.h>
+#include <stdio.h>
+#include <string>
 #include "config.h"
 
 typedef struct resamplefmt {
@@ -52,9 +53,10 @@ class AudioBuffer
 
 	private:
 		// WAV file output related variables
-		FILE** outputFiles;
-		DWORD* dataSectionOffset;
-		DWORD* fileLength;
+		FILE** fOriginalOutputFiles;
+		FILE** fResampledOutputFiles;
+		DWORD* nOriginalFileLength;
+		DWORD* nResampledFileLength;
 		std::string sFilename;
 		BOOL bOutputWAV = FALSE;
 	

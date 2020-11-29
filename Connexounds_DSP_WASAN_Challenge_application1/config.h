@@ -20,3 +20,7 @@
 #define AGGREGATOR_CIRCULAR_BUFFER_SIZE 44100   // number of endpoint buffer sized packets to fit
 
 #define DEBUG                                   // flag aiding in automatic exit after 10s
+
+// libresample
+/* Accuracy */
+#define Npc 4096

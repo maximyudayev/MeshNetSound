@@ -1,6 +1,4 @@
 #include "AudioBuffer.h"
-#include <stdio.h>
-#include <string>
 
 /// <summary>
 /// <para>Static class member variable.</para>
@@ -14,14 +12,14 @@ UINT32 AudioBuffer::nNewChannelOffset{ 0 };
 /// <para>Calling thread must call AudioBuffer::SetFormat() and AudioBuffer::InitBuffer()
 /// before using any other functionality of the class.</para>
 /// <para>Note: The AudioBuffer does not limit, but assumes the maximum number
-/// of channels per arbitrary device to not exceed 256. That includes
+/// of channels per arbitrary device to not exceed 2^32. That includes
 /// "virtual" devices (i.e. aggregated WASAN devices connected to another,
 /// each having aggregated own devices). In case larger number of aggregated
-/// channels is required for a truly enormous WASAN (i.e. 256+ aggregated channels
+/// channels is required for a truly enormous WASAN (i.e. up to 2^64 aggregated channels
 /// in the network, composed of N multichanneled connected devices, PCs, BT sets, etc.)
 /// only the data type of all variables (i.e. in loops) operating with nChannels
 /// variable, along with the variable itself, must be updated to the desired bit width
-/// (i.e. UINT16, UINT32, UINT64).</para>
+/// (i.e. UINT8, UINT16, UINT32, UINT64).</para>
 /// <para>TODO: at compile or run time request user about the intended size of WASAN
 /// and choose bit width of the nChannels and all corresponding supporting variables
 /// accordingly.</para>
@@ -34,7 +32,7 @@ AudioBuffer::AudioBuffer(std::string filename)
 
 /// <summary>
 /// <para>AudioBuffer destructor.</para>
-/// <para>Closes WAV files, if used, and frees alloc'ed memory of FILE array and 2D audio buffer array.</para>
+/// <para>Closes WAV files, if used, and frees alloc'ed memory of FILE arrays and file lengths.</para>
 /// <para>TODO: expand versatility by checking the actual audio format.</para>
 /// </summary>
 AudioBuffer::~AudioBuffer()
@@ -42,26 +40,50 @@ AudioBuffer::~AudioBuffer()
     // Cleans up WAV files
     if (bOutputWAV)
     {
-        for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
+        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
         {
             // Gets complete file length
-            fileLength[i] = ftell(outputFiles[i]);
+            nOriginalFileLength[i] = ftell(fOriginalOutputFiles[i]);
 
             // Fills missing data chunk size data in the WAV file (Data) headers
-            fseek(outputFiles[i], 64, SEEK_SET); // updates file pointer into the byte identifying data chunk size
-            DWORD dataChunkSize = fileLength[i] - 68;
-            fwrite(&dataChunkSize, sizeof(DWORD), 1, outputFiles[i]);
+            fseek(fOriginalOutputFiles[i], 64, SEEK_SET); // updates file pointer into the byte identifying data chunk size
+            DWORD dataChunkSize = nOriginalFileLength[i] - 68;
+            fwrite(&dataChunkSize, sizeof(DWORD), 1, fOriginalOutputFiles[i]);
 
             // Fills missing file size data in the WAV file (RIFF) headers
-            fseek(outputFiles[i], 4, SEEK_SET); // updates file pointer into the byte identifying file size
-            DWORD fileChunkSize = fileLength[i] - 8;
-            fwrite(&fileChunkSize, sizeof(DWORD), 1, outputFiles[i]);
+            fseek(fOriginalOutputFiles[i], 4, SEEK_SET); // updates file pointer into the byte identifying file size
+            DWORD fileChunkSize = nOriginalFileLength[i] - 8;
+            fwrite(&fileChunkSize, sizeof(DWORD), 1, fOriginalOutputFiles[i]);
 
             // Closes WAV files
-            fclose(outputFiles[i]);
+            fclose(fOriginalOutputFiles[i]);
         }
-        free(outputFiles);
-        free(fileLength);
+        free(fOriginalOutputFiles);
+        free(nOriginalFileLength);
+
+        if (tResampleFmt.nUpsample > 1 || tResampleFmt.nDownsample > 1)
+        {
+            for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+            {
+                // Gets complete file length
+                nResampledFileLength[i] = ftell(fResampledOutputFiles[i]);
+
+                // Fills missing data chunk size data in the WAV file (Data) headers
+                fseek(fResampledOutputFiles[i], 64, SEEK_SET); // updates file pointer into the byte identifying data chunk size
+                DWORD dataChunkSize = nResampledFileLength[i] - 68;
+                fwrite(&dataChunkSize, sizeof(DWORD), 1, fResampledOutputFiles[i]);
+
+                // Fills missing file size data in the WAV file (RIFF) headers
+                fseek(fResampledOutputFiles[i], 4, SEEK_SET); // updates file pointer into the byte identifying file size
+                DWORD fileChunkSize = nResampledFileLength[i] - 8;
+                fwrite(&fileChunkSize, sizeof(DWORD), 1, fResampledOutputFiles[i]);
+
+                // Closes WAV files
+                fclose(fResampledOutputFiles[i]);
+            }
+            free(fResampledOutputFiles);
+            free(nResampledFileLength);
+        }
     }
 }
 
@@ -139,49 +161,88 @@ HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBu
 }
 
 /// <summary>
-/// <para>Initializes .WAV file headers for each channel of a device.</para>
+/// <para>Initializes .WAV file headers for each channel of a device.
+/// If original stream is resampled, also initializes .WAV file headers 
+/// for the resampled version of the dat.</para>
 /// </summary>
 /// <returns>
-/// ERROR_TOO_MANY_OPEN_FILES if fopen fails for FILE_OPEN_ATTEMPTS times.
-/// ERROR_SUCCESS if WAV file for each channel is properly initialized.
+/// <para>ERROR_TOO_MANY_OPEN_FILES if fopen fails for FILE_OPEN_ATTEMPTS times.</para>
+/// <para>ERROR_SUCCESS if WAV file for each channel is properly initialized.</para>
 /// </returns>
 HRESULT AudioBuffer::InitWAV()
 {
     bOutputWAV = TRUE;
-    outputFiles = (FILE**)malloc(tEndpointFmt.nChannels * sizeof(FILE*));
-    fileLength = (DWORD*)malloc(tEndpointFmt.nChannels * sizeof(DWORD));
+    fOriginalOutputFiles = (FILE**)malloc(tEndpointFmt.nChannels * sizeof(FILE*));
+    nOriginalFileLength = (DWORD*)malloc(tEndpointFmt.nChannels * sizeof(DWORD));
 
     WORD ch = 1;
     DWORD fmtLength = 40;
     DWORD newAvgBytesPerSec = tEndpointFmt.nAvgBytesPerSec / tEndpointFmt.nChannels;
     WORD newBlockAlign = tEndpointFmt.nBlockAlign / tEndpointFmt.nChannels;
 
-    for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
+    for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
     {
         for (UINT8 attempts = 0; attempts < WAV_FILE_OPEN_ATTEMPTS; attempts++)
         {
-            outputFiles[i] = fopen((sFilename + std::to_string(i + 1) + ".wav").c_str(), "wb");
+            fOriginalOutputFiles[i] = fopen(("Audio Files/" + sFilename + std::to_string(i + 1) + ".wav").c_str(), "wb");
 
-            if (outputFiles[i] != NULL) break;
-            else if (attempts == WAV_FILE_OPEN_ATTEMPTS - 1 && outputFiles[i] == NULL) return ERROR_TOO_MANY_OPEN_FILES;
+            if (fOriginalOutputFiles[i] != NULL) break;
+            else if (attempts == WAV_FILE_OPEN_ATTEMPTS - 1 && fOriginalOutputFiles[i] == NULL) return ERROR_TOO_MANY_OPEN_FILES;
         }
 
         // RIFF Header
-        fputs("RIFF----WAVEfmt ", outputFiles[i]);
+        fputs("RIFF----WAVEfmt ", fOriginalOutputFiles[i]);
         // Format-Section
-        fwrite(&fmtLength, sizeof(DWORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.wFormatTag, sizeof(WORD), 1, outputFiles[i]);
-        fwrite(&ch, sizeof(WORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.nSamplesPerSec, sizeof(DWORD), 1, outputFiles[i]);
-        fwrite(&newAvgBytesPerSec, sizeof(DWORD), 1, outputFiles[i]);
-        fwrite(&newBlockAlign, sizeof(WORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.wBitsPerSample, sizeof(WORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.cbSize, sizeof(WORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.wValidBitsPerSample, sizeof(WORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.channelMask, sizeof(DWORD), 1, outputFiles[i]);
-        fwrite(&tEndpointFmt.subFormat, sizeof(GUID), 1, outputFiles[i]);
+        fwrite(&fmtLength, sizeof(DWORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.wFormatTag, sizeof(WORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&ch, sizeof(WORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.nSamplesPerSec, sizeof(DWORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&newAvgBytesPerSec, sizeof(DWORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&newBlockAlign, sizeof(WORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.wBitsPerSample, sizeof(WORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.cbSize, sizeof(WORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.wValidBitsPerSample, sizeof(WORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.channelMask, sizeof(DWORD), 1, fOriginalOutputFiles[i]);
+        fwrite(&tEndpointFmt.subFormat, sizeof(GUID), 1, fOriginalOutputFiles[i]);
         // Data-Section
-        fputs("data----", outputFiles[i]);
+        fputs("data----", fOriginalOutputFiles[i]);
+    }
+
+    if (tResampleFmt.nUpsample > 1 || tResampleFmt.nDownsample > 1)
+    {
+        fResampledOutputFiles = (FILE**)malloc(tEndpointFmt.nChannels * sizeof(FILE*));
+        nResampledFileLength = (DWORD*)malloc(tEndpointFmt.nChannels * sizeof(DWORD));
+    
+        newAvgBytesPerSec = newAvgBytesPerSec * tResampleFmt.nUpsample / tResampleFmt.nDownsample;
+        DWORD newResampledSamplesPerSec = tEndpointFmt.nSamplesPerSec * tResampleFmt.nUpsample / tResampleFmt.nDownsample;
+
+        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+        {
+            for (UINT8 attempts = 0; attempts < WAV_FILE_OPEN_ATTEMPTS; attempts++)
+            {
+                fResampledOutputFiles[i] = fopen(("Audio Files/" + sFilename + std::to_string(i + 1) + " Resampled.wav").c_str(), "wb");
+
+                if (fResampledOutputFiles[i] != NULL) break;
+                else if (attempts == WAV_FILE_OPEN_ATTEMPTS - 1 && fResampledOutputFiles[i] == NULL) return ERROR_TOO_MANY_OPEN_FILES;
+            }
+
+            // RIFF Header
+            fputs("RIFF----WAVEfmt ", fResampledOutputFiles[i]);
+            // Format-Section
+            fwrite(&fmtLength, sizeof(DWORD), 1, fResampledOutputFiles[i]);
+            fwrite(&tEndpointFmt.wFormatTag, sizeof(WORD), 1, fResampledOutputFiles[i]);
+            fwrite(&ch, sizeof(WORD), 1, fResampledOutputFiles[i]);
+            fwrite(&newResampledSamplesPerSec, sizeof(DWORD), 1, fResampledOutputFiles[i]);
+            fwrite(&newAvgBytesPerSec, sizeof(DWORD), 1, fResampledOutputFiles[i]);
+            fwrite(&newBlockAlign, sizeof(WORD), 1, fResampledOutputFiles[i]);
+            fwrite(&tEndpointFmt.wBitsPerSample, sizeof(WORD), 1, fResampledOutputFiles[i]);
+            fwrite(&tEndpointFmt.cbSize, sizeof(WORD), 1, fResampledOutputFiles[i]);
+            fwrite(&tEndpointFmt.wValidBitsPerSample, sizeof(WORD), 1, fResampledOutputFiles[i]);
+            fwrite(&tEndpointFmt.channelMask, sizeof(DWORD), 1, fResampledOutputFiles[i]);
+            fwrite(&tEndpointFmt.subFormat, sizeof(GUID), 1, fResampledOutputFiles[i]);
+            // Data-Section
+            fputs("data----", fResampledOutputFiles[i]);
+        }
     }
 
     return ERROR_SUCCESS;
@@ -225,7 +286,7 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
     if (tResampleFmt.nBufferOffset + *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample <= *tResampleFmt.nBufferSize)
     {
         // Set upsampled number of frames in the circular buffer to 0
-        for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
+        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
         {
             memset(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 0, 
                 sizeof(FLOAT) * *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample);
@@ -234,7 +295,7 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
             // (takes first tEndpointFmt.nBufferSize 0's from newly cleared tResampleFmt.pBuffer[i] chunk)
             // Will never overflow result of memset
             if (pData == NULL && bOutputWAV) 
-                fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, sizeof(FLOAT), *tEndpointFmt.nBufferSize, outputFiles[i]);
+                fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, sizeof(FLOAT), *tEndpointFmt.nBufferSize, fOriginalOutputFiles[i]);
         }
     }
     // If the new upsampled packet overruns the length of the contigious block of memory, go circularly
@@ -242,7 +303,7 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
     {
         // Set all contiguous memory in the circular buffer until the end to 0 and also
         // the first N frames at the beginning of the circular buffer, equalling the remaining frames of the packet
-        for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
+        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
         {
             // Set al frames until the end of circular buffer to 0
             memset(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 0, 
@@ -260,18 +321,20 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
                     fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
                         sizeof(FLOAT), 
                         *tEndpointFmt.nBufferSize, 
-                        outputFiles[i]);
+                        fOriginalOutputFiles[i]);
                 else
                 {
                     fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
                         sizeof(FLOAT), 
-                        *tEndpointFmt.nBufferSize - *tEndpointFmt.nBufferSize % (*tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset), 
-                        outputFiles[i]);
+                        static_cast<size_t>(*tEndpointFmt.nBufferSize) - 
+                            *tEndpointFmt.nBufferSize % 
+                            (static_cast<unsigned long long>(*tResampleFmt.nBufferSize) - tResampleFmt.nBufferOffset), 
+                        fOriginalOutputFiles[i]);
                     
                     fwrite(tResampleFmt.pBuffer[nChannelOffset + i],
                         sizeof(FLOAT),
-                        *tEndpointFmt.nBufferSize % (*tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset),
-                        outputFiles[i]);
+                        *tEndpointFmt.nBufferSize % (static_cast<size_t>(*tResampleFmt.nBufferSize) - tResampleFmt.nBufferOffset),
+                        fOriginalOutputFiles[i]);
                 }
             }
         }
@@ -285,15 +348,17 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
         // Modulo operator allows to go in circular fashion so no code duplication is required
         for (UINT32 j = 0; j < *tEndpointFmt.nBufferSize; j++, pData += tEndpointFmt.nBlockAlign)
         {
-            for (UINT8 i = 0; i < tEndpointFmt.nChannels; i++)
+            for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
             {
-                *(tResampleFmt.pBuffer[nChannelOffset + i] + (tResampleFmt.nBufferOffset + tResampleFmt.nUpsample * j) % *tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
+                *(tResampleFmt.pBuffer[nChannelOffset + i] + 
+                    (tResampleFmt.nBufferOffset + tResampleFmt.nUpsample * j) % 
+                    *tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
                 
-                if (bOutputWAV) fwrite(((FLOAT*)pData) + i, sizeof(FLOAT), 1, outputFiles[i]);
+                if (bOutputWAV) fwrite(((FLOAT*)pData) + i, sizeof(FLOAT), 1, fOriginalOutputFiles[i]);
             }
         }
 
-        // Convolving with a sinc
+        // Low-pass FIR filtering - convolution with a sinc
 
     }
 
@@ -304,7 +369,8 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
     //-------------------- End --------------------//
 
     // Update the offset to position after the last frame of the current chunk
-    tResampleFmt.nBufferOffset = (tResampleFmt.nBufferOffset + *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample) % *tResampleFmt.nBufferSize;
+    tResampleFmt.nBufferOffset = (tResampleFmt.nBufferOffset + *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample) % 
+                                    *tResampleFmt.nBufferSize;
 
 #ifdef DEBUG
     // Stops capture, used for debugging

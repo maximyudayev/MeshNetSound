@@ -13,12 +13,30 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\libresample">
+      <UniqueIdentifier>{1c00a9e6-f792-4127-b7bb-60940fd825c3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\libresample">
+      <UniqueIdentifier>{b87570fd-f153-4d40-9b6e-58fd9ae6253a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\Audio Files">
+      <UniqueIdentifier>{b115567b-3b43-4393-89e5-1b3f0b3597ce}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ThreadingTest.cpp">
+    <ClCompile Include="AudioBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="AudioBuffer.cpp">
+    <ClCompile Include="libresample\src\resamplesubs.c">
+      <Filter>Source Files\libresample</Filter>
+    </ClCompile>
+    <ClCompile Include="libresample\src\resample.c">
+      <Filter>Source Files\libresample</Filter>
+    </ClCompile>
+    <ClCompile Include="libresample\src\filterkit.c">
+      <Filter>Source Files\libresample</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Aggregator.cpp">
@@ -35,8 +53,28 @@
     <ClInclude Include="config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="libresample\src\filterkit.h">
+      <Filter>Header Files\libresample</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include=".gitignore" />
+    <Media Include="Audio Files\BT capture1 - Event-Driven.wav">
+      <Filter>Resource Files\Audio Files</Filter>
+    </Media>
+    <Media Include="Audio Files\BT capture1.wav">
+      <Filter>Resource Files\Audio Files</Filter>
+    </Media>
+    <Media Include="Audio Files\Mic capture1 - Event-Driven.wav">
+      <Filter>Resource Files\Audio Files</Filter>
+    </Media>
+    <Media Include="Audio Files\Mic capture1.wav">
+      <Filter>Resource Files\Audio Files</Filter>
+    </Media>
+    <Media Include="Audio Files\Mic capture2 - Event-Driven.wav">
+      <Filter>Resource Files\Audio Files</Filter>
+    </Media>
+    <Media Include="Audio Files\Mic capture2.wav">
+      <Filter>Resource Files\Audio Files</Filter>
+    </Media>
   </ItemGroup>
 </Project>
