@@ -11,6 +11,7 @@
 
 #include "Resampler.h"
 
+RESAMPLERPARAMS	Resampler::tResamplerParams;
 /*
  * reference: "Digital Filters, 2nd edition"
  *            R.W. Hamming, pp. 178-179

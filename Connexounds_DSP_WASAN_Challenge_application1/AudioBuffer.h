@@ -11,29 +11,6 @@
 #include "config.h"
 #include "Resampler.h"
 
-typedef struct resamplefmt {
-	FLOAT** pBuffer;
-	UINT32 nBufferOffset;
-	UINT32* nBufferSize;
-	DWORD nUpsample;
-	DWORD nDownsample;
-	FLOAT fFactor;
-} RESAMPLEFMT;
-
-typedef struct endpointfmt {
-	UINT32* nBufferSize; // not fixed because number of frames is dictated by WASAPI due to AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY
-	WORD nBlockAlign;
-	WORD nChannels;
-	WORD wBitsPerSample;
-	WORD wValidBitsPerSample;
-	WORD nBytesInSample;
-	WORD wFormatTag;
-	WORD cbSize;
-	DWORD nSamplesPerSec;
-	DWORD nAvgBytesPerSec;
-	DWORD channelMask;
-	GUID subFormat;
-} ENDPOINTFMT;
 
 class AudioBuffer
 {
@@ -57,7 +34,7 @@ class AudioBuffer
 	
 		// Circular buffer related variables
 		RESAMPLEFMT			tResampleFmt;
-		Resampler			* pResampler;
+		Resampler			 *pResampler;
 
 		// Endpoint buffer related variables
 		ENDPOINTFMT			tEndpointFmt;

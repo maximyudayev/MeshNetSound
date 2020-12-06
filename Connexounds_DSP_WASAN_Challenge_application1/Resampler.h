@@ -6,7 +6,22 @@
 #include <stdio.h>
 #include <string.h>
 #include "config.h"
-#include "AudioBuffer.h"
+
+
+typedef struct endpointfmt {
+	UINT32* nBufferSize; // not fixed because number of frames is dictated by WASAPI due to AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY
+	WORD nBlockAlign;
+	WORD nChannels;
+	WORD wBitsPerSample;
+	WORD wValidBitsPerSample;
+	WORD nBytesInSample;
+	WORD wFormatTag;
+	WORD cbSize;
+	DWORD nSamplesPerSec;
+	DWORD nAvgBytesPerSec;
+	DWORD channelMask;
+	GUID subFormat;
+} ENDPOINTFMT;
 
 typedef struct resampler {
 	FLOAT* pImp;	// Filter coefficients
@@ -20,6 +35,18 @@ typedef struct resampler {
 	DOUBLE fRollOff;
 	DOUBLE fBeta;
 } RESAMPLERPARAMS;
+
+
+
+typedef struct resamplefmt {
+	FLOAT** pBuffer;
+	UINT32 nBufferOffset;
+	UINT32* nBufferSize;
+	DWORD nUpsample;
+	DWORD nDownsample;
+	FLOAT fFactor;
+} RESAMPLEFMT;
+
 
 /// <summary>
 /// Ring Buffer Resampler.
@@ -39,5 +66,5 @@ private:
 
 	// Variables
 	FLOAT						fLPScale				{ 1.0 };
-	static RESAMPLERPARAMS		tResamplerParams;
+    static RESAMPLERPARAMS		tResamplerParams;
 };
