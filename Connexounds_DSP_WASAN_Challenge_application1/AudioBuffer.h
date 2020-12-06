@@ -9,13 +9,15 @@
 #include <stdio.h>
 #include <string>
 #include "config.h"
+#include "Resampler.h"
 
 typedef struct resamplefmt {
 	FLOAT** pBuffer;
 	UINT32 nBufferOffset;
-	UINT32* nBufferSize; 
+	UINT32* nBufferSize;
 	DWORD nUpsample;
 	DWORD nDownsample;
+	FLOAT fFactor;
 } RESAMPLEFMT;
 
 typedef struct endpointfmt {
@@ -44,32 +46,29 @@ class AudioBuffer
 		HRESULT InitWAV();
 		HRESULT CopyData(BYTE* pData, BOOL* bDone);
 
-		static const FLOAT sinc(UINT32 index)
-		{
-			static const FLOAT a[] = { 1, -1 };
-			return a[index];
-		};
-		static const UINT32 nSincWeights = 2;
-
 	private:
 		// WAV file output related variables
-		FILE** fOriginalOutputFiles;
-		FILE** fResampledOutputFiles;
-		DWORD* nOriginalFileLength;
-		DWORD* nResampledFileLength;
-		std::string sFilename;
-		BOOL bOutputWAV = FALSE;
+		FILE				** fOriginalOutputFiles,
+							** fResampledOutputFiles;
+		DWORD				* nOriginalFileLength,
+							* nResampledFileLength;
+		std::string			sFilename;
+		BOOL				bOutputWAV						{ FALSE };
 	
 		// Circular buffer related variables
-		RESAMPLEFMT tResampleFmt;
+		RESAMPLEFMT			tResampleFmt;
+		Resampler			* pResampler;
 
 		// Endpoint buffer related variables
-		ENDPOINTFMT tEndpointFmt;
+		ENDPOINTFMT			tEndpointFmt;
 
-		UINT32 nChannelOffset;
-		static UINT32 nNewChannelOffset;
+		UINT32				nChannelOffset;
+		static UINT32		nNewChannelOffset;
+
+		UINT32				nInstance;
+		static UINT32		nNewInstance;
 
 #ifdef DEBUG
-		UINT32 durationCounter{ 0 };
+		UINT32				durationCounter					{ 0 };
 #endif // DEBUG
 };

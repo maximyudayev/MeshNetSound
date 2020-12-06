@@ -1,3 +1,15 @@
+/*
+    TODO:
+        I. make possible to update endpoint buffer length on demand.
+        II. expand versatility by checking the actual audio format.
+        III. at compile or run time request user about the intended size of WASAN
+            and choose bit width of the nChannels and all corresponding 
+            supporting variables accordingly.
+        IV. add intelligence to the function to choose time- vs. frequency-based resampling,
+            depending on the size of the RESAMPLEFMT_T.pBuffer.
+        V. provide for case when silence was written to file.
+*/
+
 #include "AudioBuffer.h"
 
 /// <summary>
@@ -6,6 +18,7 @@
 /// for objects to know their order of indices.</para>
 /// </summary>
 UINT32 AudioBuffer::nNewChannelOffset{ 0 };
+UINT32 AudioBuffer::nNewInstance{ 0 };
 
 /// <summary>
 /// <para>AudioBuffer constructor.</para>
@@ -20,20 +33,23 @@ UINT32 AudioBuffer::nNewChannelOffset{ 0 };
 /// only the data type of all variables (i.e. in loops) operating with nChannels
 /// variable, along with the variable itself, must be updated to the desired bit width
 /// (i.e. UINT8, UINT16, UINT32, UINT64).</para>
-/// <para>TODO: at compile or run time request user about the intended size of WASAN
-/// and choose bit width of the nChannels and all corresponding supporting variables
-/// accordingly.</para>
 /// </summary>
 /// <param name="filename">- stores filename used for writing WAV files</param>
 AudioBuffer::AudioBuffer(std::string filename)
 {
     sFilename = filename;
+
+    // Indicate to this AudioBuffer instance its identifier
+    nInstance = AudioBuffer::nNewInstance;
+    // Update the new instance identifier for the next Class member
+    AudioBuffer::nNewInstance ++;
+
+    pResampler = new Resampler();
 }
 
 /// <summary>
 /// <para>AudioBuffer destructor.</para>
 /// <para>Closes WAV files, if used, and frees alloc'ed memory of FILE arrays and file lengths.</para>
-/// <para>TODO: expand versatility by checking the actual audio format.</para>
 /// </summary>
 AudioBuffer::~AudioBuffer()
 {
@@ -85,6 +101,8 @@ AudioBuffer::~AudioBuffer()
             free(nResampledFileLength);
         }
     }
+
+    delete pResampler;
 }
 
 /// <summary>
@@ -130,7 +148,6 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
 /// <para>Note: currently not thread-safe since AudioBuffer::nNextChannelOffset
 /// does not yet have a mutex. Each AudioBuffer should call InitBuffer sequentially
 /// in order to properly setup circular buffer channel offsets for each channel.</para>
-/// <para>TODO: make possible to update endpoint buffer length on demand.</para>
 /// </summary>
 /// <param name="nEndpointBufferSize">- length of endpoint buffer per channel</param>
 /// <param name="pCircularBuffer">- pointer to memory of the first channel of the corresponding 
@@ -151,6 +168,12 @@ HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBu
     tResampleFmt.nBufferOffset = 0;
     tResampleFmt.nUpsample = nUpsample;
     tResampleFmt.nDownsample = nDownsample;
+    tResampleFmt.fFactor = (FLOAT)nUpsample / (FLOAT)nDownsample;
+    
+    // Set LP scaling factor in the associated resampler according to the resampling factor
+    pResampler->SetLPScaling(tResampleFmt.fFactor);
+    
+    std::cout << MSG "The resample factor of device " << nInstance << " is: " << tResampleFmt.fFactor << std::endl;
 
     // Indicate to this AudioBuffer instance its absolute buffer channel position
     nChannelOffset = AudioBuffer::nNewChannelOffset;
@@ -262,120 +285,90 @@ HRESULT AudioBuffer::InitWAV()
 /// <para>Calling thread must ensure integrity of pBuffer and allocate enough
 /// memory in first dimension to fit all channels for all devices.</para>
 /// <para>Each AudioBuffer object writes resampled channelwise data decimated from
-/// captured endpoint data to consecutive row vectors of RESAMPLEFMT.pBuffer.</para>
+/// captured endpoint data to consecutive row vectors of RESAMPLEFMT_T.pBuffer.</para>
 /// <para>Note: It might be better in the future to use DMA.</para>
-/// <para>TODO: add intelligence to the function to choose time- vs. 
-/// frequency-based resampling, depending on the size of the RESAMPLEFMT.pBuffer.</para>
 /// </summary>
 /// <param name="pData">- pointer to the first byte into the endpoint's newly captured packet</param>
 /// <param name="bDone">- address of the variable responsible for terminating the program</param>
-/// <returns>
-/// 
-/// </returns>
+/// <returns></returns>
 HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
 {
+    BYTE* pDataDummy = pData;
+    UINT32 nSamplesWritten = 0;
 #ifdef DEBUG
     durationCounter++;
 #endif // DEBUG
-
-    //-------------------- Upsampling --------------------//
-    // Prefill circular buffer space for next packet of the device with 0's before interpolating
-
-    // Because it is a circular buffer, must check if setting memory to 0 can be done contigiously
-    // If the new upsampled packet can fit in the remainder of the circular buffer, set everything ahead to 0
-    if (tResampleFmt.nBufferOffset + *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample <= *tResampleFmt.nBufferSize)
-    {
-        // Set upsampled number of frames in the circular buffer to 0
-        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
-        {
-            memset(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 0, 
-                sizeof(FLOAT) * *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample);
-            
-            // If AUDCLNT_BUFFERFLAGS_SILENT is set and capturing WAV files, write silence to file 
-            // (takes first tEndpointFmt.nBufferSize 0's from newly cleared tResampleFmt.pBuffer[i] chunk)
-            // Will never overflow result of memset
-            if (pData == NULL && bOutputWAV) 
-                fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, sizeof(FLOAT), *tEndpointFmt.nBufferSize, fOriginalOutputFiles[i]);
-        }
-    }
-    // If the new upsampled packet overruns the length of the contigious block of memory, go circularly
-    else
-    {
-        // Set all contiguous memory in the circular buffer until the end to 0 and also
-        // the first N frames at the beginning of the circular buffer, equalling the remaining frames of the packet
-        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
-        {
-            // Set al frames until the end of circular buffer to 0
-            memset(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 0, 
-                sizeof(FLOAT) * (*tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset));
-            // Set the next remaining number of frames at the beginning of the circular buffer to 0
-            memset(tResampleFmt.pBuffer[nChannelOffset + i], 0, 
-                sizeof(FLOAT) * ((tResampleFmt.nBufferOffset + *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample) % *tResampleFmt.nBufferSize));
-
-            // If AUDCLNT_BUFFERFLAGS_SILENT is set and capturing WAV files, write silence to file 
-            // (takes first tEndpointFmt.nBufferSize 0's from newly cleared tResampleFmt.pBuffer[i] chunk)
-            // 
-            if (pData == NULL && bOutputWAV)
-            {
-                if (tResampleFmt.nBufferOffset + tEndpointFmt.nBufferSize <= tResampleFmt.nBufferSize)
-                    fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
-                        sizeof(FLOAT), 
-                        *tEndpointFmt.nBufferSize, 
-                        fOriginalOutputFiles[i]);
-                else
-                {
-                    fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
-                        sizeof(FLOAT), 
-                        static_cast<size_t>(*tEndpointFmt.nBufferSize) - 
-                            *tEndpointFmt.nBufferSize % 
-                            (static_cast<unsigned long long>(*tResampleFmt.nBufferSize) - tResampleFmt.nBufferOffset), 
-                        fOriginalOutputFiles[i]);
-                    
-                    fwrite(tResampleFmt.pBuffer[nChannelOffset + i],
-                        sizeof(FLOAT),
-                        *tEndpointFmt.nBufferSize % (static_cast<size_t>(*tResampleFmt.nBufferSize) - tResampleFmt.nBufferOffset),
-                        fOriginalOutputFiles[i]);
-                }
-            }
-        }
-    }
+    
+    // Modulo operator allows to go in circular fashion so no code duplication is required
 
     // When user calls AudioBuffer::CopyData with pData = NULL, AUDCLNT_BUFFERFLAGS_SILENT flag is set
     // results in keeping 0's bulk set in previous step in the audio buffer data structure
     if (pData != NULL)
     {
-        // Insert original frames every nUpsample-1 instances.
-        // Modulo operator allows to go in circular fashion so no code duplication is required
-        for (UINT32 j = 0; j < *tEndpointFmt.nBufferSize; j++, pData += tEndpointFmt.nBlockAlign)
-        {
-            for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+        // Save original signal to file if user requested
+        if (bOutputWAV) 
+            for (UINT32 j = 0; j < *tEndpointFmt.nBufferSize; j++, pDataDummy += tEndpointFmt.nBlockAlign)
+                for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+                    fwrite(((FLOAT*)pDataDummy) + i, sizeof(FLOAT), 1, fOriginalOutputFiles[i]);
+
+        // Perform resampling if resampling factor is other than 1
+        if (tResampleFmt.fFactor != 1.0)
+        {   
+            // Sample rate convert the packet and place in circular buffer
+            nSamplesWritten = pResampler->Resample(tResampleFmt, tEndpointFmt, nChannelOffset, pData);
+            
+            // Write freshly resampled stream into file if user requested
+            if (bOutputWAV) 
             {
-                *(tResampleFmt.pBuffer[nChannelOffset + i] + 
-                    (tResampleFmt.nBufferOffset + tResampleFmt.nUpsample * j) % 
-                    *tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
-                
-                if (bOutputWAV) fwrite(((FLOAT*)pData) + i, sizeof(FLOAT), 1, fOriginalOutputFiles[i]);
+                for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+                {
+                    // If data was filled at most up to the end of memory allocated for ring buffer
+                    if (tResampleFmt.nBufferOffset + nSamplesWritten <= *(tResampleFmt.nBufferSize))
+                        // Write to file data from ring buffer from the previous offset up till the number of resampled frames
+                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 
+                            sizeof(FLOAT), 
+                            nSamplesWritten, 
+                            fResampledOutputFiles[i]);
+                    // If more data was filled in the buffer than the amount of free contigious memory in the ring buffer, go circularly
+                    else
+                    {
+                        // Write data to file from ring buffer's offset up till the end of the ring buffer
+                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
+                            sizeof(FLOAT),
+                            *tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset,
+                            fResampledOutputFiles[i]);
+                        
+                        // Write data to file from ring buffer's beginnig up till the remaining number of resampled frames
+                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i],
+                            sizeof(FLOAT),
+                            (tResampleFmt.nBufferOffset + nSamplesWritten) % *tResampleFmt.nBufferSize, 
+                            fResampledOutputFiles[i]);
+                    }
+                }
             }
         }
-
-        // Low-pass FIR filtering - convolution with a sinc
-
+        else // If factor is 1, right data straight into the ring buffer, don't write resampled file
+        {
+            nSamplesWritten = *tEndpointFmt.nBufferSize;
+            pDataDummy = pData;
+            for (UINT32 j = 0; j < *tEndpointFmt.nBufferSize; j++, pDataDummy += tEndpointFmt.nBlockAlign)
+                for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+                    *(tResampleFmt.pBuffer[nChannelOffset + i] + (tResampleFmt.nBufferOffset + j) % *tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
+        }
+    }
+    else
+    {
+        // TODO: provide for case when silence was written to file
     }
 
-    //-------------------- Downsampling --------------------//
-
-
-
     //-------------------- End --------------------//
-
     // Update the offset to position after the last frame of the current chunk
-    tResampleFmt.nBufferOffset = (tResampleFmt.nBufferOffset + *tEndpointFmt.nBufferSize * tResampleFmt.nUpsample) % 
-                                    *tResampleFmt.nBufferSize;
+    tResampleFmt.nBufferOffset = (tResampleFmt.nBufferOffset + nSamplesWritten) % *tResampleFmt.nBufferSize;
 
 #ifdef DEBUG
     // Stops capture, used for debugging
     if (durationCounter >= 1000) *bDone = TRUE;
 #endif // DEBUG
-    
+
     return ERROR_SUCCESS;
 }

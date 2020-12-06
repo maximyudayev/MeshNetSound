@@ -1,4 +1,5 @@
 #include "Aggregator.h"
+#include <iostream>
 
 /// <summary>
 /// <para>Entry point of the program.</para>
@@ -22,14 +23,14 @@ int main(int argc, char* argv[])
 	// 
 	std::cout << "<--------Starting Aggregator-------->" << std::endl << std::endl;
 
-	Aggregator* pAggregator = new Aggregator();
+	Aggregator pAggregator;
 	
-	hr = pAggregator->Initialize();
+	hr = pAggregator.Initialize();
 	
-	hr = pAggregator->Start();
+	hr = pAggregator.Start();
 
 #ifndef DEBUG
-	//hr = pAggregator->Stop();
+	//hr = pAggregator.Stop();
 #endif
 
 	return hr;

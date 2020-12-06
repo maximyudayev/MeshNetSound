@@ -11,6 +11,11 @@
         III. convert class into a thread-safe Singleton.
         IV. facilitate modularity for cross-platform portability.
         V. provide better device friendly names (i.e Max's Airpods, etc.)
+        VI. convert class into a thread-safe Singleton.
+        VII. turn into a separate thread to provide additional functionality without waiting 
+            for CPU or delaying processing of incoming data.
+        IIX. incorporate more user input verification.
+        IX. check if the input is actually a number (atoi is not safe if input is not an integer)
 */
 
 #include "Aggregator.h"
@@ -28,12 +33,8 @@ static const IID       IID_IAudioCaptureClient      = __uuidof(IAudioCaptureClie
 /// <para>High level, clean interface to perform all the cumbersome setup
 /// and negotiation with WASAPI, user parameters, etc.</para>
 /// <para>Note: not thread-safe, must be instantiated only once.</para>
-/// <para>TODO: convert class into a thread-safe Singleton.</para>
 /// </summary>
-Aggregator::Aggregator()
-{
-    
-}
+Aggregator::Aggregator(){}
 
 /// <summary>
 /// <para>Aggregator destructor.</para>
@@ -60,7 +61,10 @@ Aggregator::~Aggregator()
     //-------- Release memory alloc'ed by Aggregator
     // Destruct AudioBuffer objects and gracefully wrap up their work
     for (UINT32 i = 0; i < nCaptureDevices; i++)
-        pAudioBuffer[i]->~AudioBuffer();
+        delete pAudioBuffer[i];
+
+    //-------- Free LP Filter memory of the Resampler class
+    Resampler::FreeLPFilter();
 
     // Release memory alloc'ed for ring buffer
     if (pCircularBuffer != NULL)
@@ -95,6 +99,10 @@ Aggregator::~Aggregator()
 /// <summary>
 /// <para>Alloc's memory and instantiates WASAPI interface
 /// to stream capture device data.</para>
+/// <para>Note: if at some point crashes, likely it is because of
+/// double deletion of pAudioBuffer or pResampler. Check if EXIT_ON_ERROR
+/// is triggered before either is instantiated using "new" and if so, provide
+/// extra safety checks.</para>
 /// </summary>
 /// <returns></returns>
 HRESULT Aggregator::Initialize()
@@ -131,8 +139,8 @@ HRESULT Aggregator::Initialize()
     //-------- Use information obtained from user inputs to dynamically create the system
     pAudioClient        = (IAudioClient**)malloc(nCaptureDevices * sizeof(IAudioClient*));
     pwfx                = (WAVEFORMATEX**)malloc(nCaptureDevices * sizeof(WAVEFORMATEX*));
-    pAudioBuffer        = (AudioBuffer**)malloc(nCaptureDevices * sizeof(AudioBuffer*));
     pCaptureClient      = (IAudioCaptureClient**)malloc(nCaptureDevices * sizeof(IAudioCaptureClient*));
+    pAudioBuffer        = (AudioBuffer**)malloc(nCaptureDevices * sizeof(AudioBuffer*));
     pData               = (BYTE**)malloc(nCaptureDevices * sizeof(BYTE*));
     nGCD                = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
     nGCDDiv             = (DWORD*)malloc(nCaptureDevices * sizeof(DWORD));
@@ -227,9 +235,12 @@ HRESULT Aggregator::Initialize()
         printf("[%d]:\nThe %d-th buffer size is: %d\n", i, i, nEndpointBufferSize[i]);
     }
 
-    //-------- Instantiate AudioBuffer object for each user-chosen capture device
+    //-------- Instantiate AudioBuffer for each user-chosen capture device
     for (UINT32 i = 0; i < nCaptureDevices; i++)
         pAudioBuffer[i] = new AudioBuffer("Device " + std::to_string(i) + " ");
+    
+    //-------- Initialize LP Filter of the Resampler class
+    Resampler::InitLPFilter(FALSE, RESAMPLER_ROLLOFF_FREQ, RESAMPLER_BETA, RESAMPLER_L_TWOS_EXP);
 
     //-------- Notify the audio sink which format to use
     for (UINT32 i = 0; i < nCaptureDevices; i++)
@@ -268,8 +279,7 @@ HRESULT Aggregator::Initialize()
     for (UINT32 i = 0; i < nCaptureDevices; i++)
     {
         hr = pAudioBuffer[i]->InitBuffer(&nEndpointBufferSize[i], pCircularBuffer,
-                                    &nCircularBufferSize,
-                                    nUpsample[i], nDownsample[i]);
+                                    &nCircularBufferSize, nUpsample[i], nDownsample[i]);
             EXIT_ON_ERROR(hr)
     }
 
@@ -291,7 +301,7 @@ HRESULT Aggregator::Initialize()
         SAFE_RELEASE(pAudioClient[i])
         SAFE_RELEASE(pCaptureClient[i])
 
-        pAudioBuffer[i]->~AudioBuffer();
+        delete pAudioBuffer[i];
     }
 
     // Free circular buffer
@@ -328,8 +338,6 @@ HRESULT Aggregator::Initialize()
 
 /// <summary>
 /// <para>Starts capturing audio from user-selected devices on a poll basis.</para>
-/// <para>TODO: turn into a separate thread to provide additional functionality
-/// without waiting for CPU or delaying processing of incoming data.</para>
 /// </summary>
 /// <returns></returns>
 HRESULT Aggregator::Start()
@@ -499,7 +507,6 @@ HRESULT Aggregator::ListCaptureDevices()
 /// <summary>
 /// <para>Prompts user to choose from devices available to the system.</para>
 /// <para>Must be called after Aggregator::ListCaptureDevices.</para>
-/// <para>TODO: incorporate more user input verification.</para>
 /// </summary>
 /// <returns></returns>
 HRESULT Aggregator::GetUserCaptureDevices()
@@ -542,7 +549,6 @@ HRESULT Aggregator::GetUserCaptureDevices()
             continue;
         }
         // If user entered a number
-        // TODO: check if the input is actually a number (atoi is not safe if input is not an integer)
         else
         {
             nUserChoice = std::atoi(sInput);

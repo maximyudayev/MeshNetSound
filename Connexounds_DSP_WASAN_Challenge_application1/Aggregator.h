@@ -1,11 +1,14 @@
 #pragma once
+#include <windows.h>
 #include <MMDeviceAPI.h>
 #include <stdio.h>
 #include <string>
 #include <memory>
 #include <functiondiscoverykeys_devpkey.h>
+#include <audiopolicy.h>
 
 #include "AudioBuffer.h"
+#include "Resampler.h"
 #include "config.h"
 
 class Aggregator
@@ -33,6 +36,8 @@ class Aggregator
 
 		// Aggregator related variables
 		AudioBuffer				** pAudioBuffer			{ NULL };
+
+		Resampler				** pResampler			{ NULL };
 
 		FLOAT					** pCircularBuffer		{ NULL }; 
 

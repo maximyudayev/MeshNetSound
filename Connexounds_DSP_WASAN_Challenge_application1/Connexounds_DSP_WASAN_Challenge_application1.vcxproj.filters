@@ -13,12 +13,6 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\libresample">
-      <UniqueIdentifier>{1c00a9e6-f792-4127-b7bb-60940fd825c3}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\libresample">
-      <UniqueIdentifier>{b87570fd-f153-4d40-9b6e-58fd9ae6253a}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioBuffer.cpp">
@@ -30,6 +24,9 @@
     <ClCompile Include="Aggregator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Resampler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AudioBuffer.h">
@@ -39,6 +36,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="config.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Resampler.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
