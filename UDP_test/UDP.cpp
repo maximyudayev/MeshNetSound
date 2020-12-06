@@ -52,7 +52,8 @@ void startServiceSeeker() {
 	 printf("ADVERTISER STARTED");
 }
 */
-void startSocketUDPListen() {
+
+void startSocketUDPNListen() {
 	SOCKET s;
 	struct sockaddr_in server, si_other;
 	int slen, recv_len;
@@ -77,9 +78,9 @@ void startSocketUDPListen() {
 	}
 	printf("Socket created.\n");
 
-	//Prepare the sockaddr_in structure
+	//Prepare the sockaddr_in structure, listens to all incoming UDP packets
 	server.sin_family = AF_INET;
-	inet_pton(AF_INET, "192.168.68.138", &server.sin_addr);
+	server.sin_addr.s_addr = INADDR_ANY;
 	server.sin_port = htons(8888);
 
 	//Bind
@@ -104,25 +105,17 @@ void startSocketUDPListen() {
 			printf("recvfrom() failed with error code : %d", WSAGetLastError());
 			exit(EXIT_FAILURE);
 		}
-
+		
 		//print details of the client/peer and the data received
 		//printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 		printf("Data: %s\n", buf);
 
-		//now reply the client with the same data
-		if (sendto(s, buf, recv_len, 0, (struct sockaddr*)&si_other, slen) == SOCKET_ERROR)
-		{
-			printf("sendto() failed with error code : %d", WSAGetLastError());
-			exit(EXIT_FAILURE);
-		}
 	}
-
 	closesocket(s);
 	WSACleanup();
 }
 
-/*
-void startSocketUDPSend() {
+std::tuple<int*,sockaddr_in*> startSocketUDPSend() {
 	struct sockaddr_in si_other;
 	int s, slen = sizeof(si_other);
 	char buf[255];
@@ -150,33 +143,28 @@ void startSocketUDPSend() {
 	si_other.sin_family = AF_INET;
 	si_other.sin_port = htons(8888);
 	inet_pton(AF_INET, "127.0.0.1", &si_other.sin_addr);
+	return { &s,&si_other };
+}
 
-	//start communication
-	while (1)
+void sendDataUDP(SOCKET s, sockaddr_in* si_other, FLOAT** pBuffer, UINT32 nBufferOffset) {
+
+	if (sendto(s, message, strlen(message), 0, (struct sockaddr*) &si_other, sizeof(si_other)) == SOCKET_ERROR)
 	{
-
-		//send the message
-		if (sendto(s, message, strlen(message), 0, (struct sockaddr*)&si_other, slen) == SOCKET_ERROR)
-		{
-			printf("sendto() failed with error code : %d", WSAGetLastError());
-			exit(EXIT_FAILURE);
-		}
-
-		
-		//receive a reply and print it
-		//clear the buffer by filling null, it might have previously received data
-		memset(buf, '\0', BUFLEN);
-		//try to receive some data, this is a blocking call
-		if (recvfrom(s, buf, BUFLEN, 0, (struct sockaddr*)&si_other, &slen) == SOCKET_ERROR)
-		{
-			printf("recvfrom() failed with error code : %d", WSAGetLastError());
-			exit(EXIT_FAILURE);
-		}
-
-		puts(buf);
+		printf("sendto() failed with error code : %d", WSAGetLastError());
+		exit(EXIT_FAILURE);
 	}
+}
 
+void sendDataUDP_debug(SOCKET s, sockaddr_in* si_other, const char* test) {
+
+	if (sendto(s, test, strlen(test), 0, (struct sockaddr*)&si_other, sizeof(si_other)) == SOCKET_ERROR)
+	{
+		printf("sendto() failed with error code : %d", WSAGetLastError());
+		exit(EXIT_FAILURE);
+	}
+}
+
+void closeSocket(SOCKET s) {
 	closesocket(s);
 	WSACleanup();
 }
-*/

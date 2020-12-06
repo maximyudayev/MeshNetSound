@@ -15,6 +15,7 @@ using namespace concurrency;
 #include<stdio.h>
 #include<winsock2.h>
 #include <Ws2tcpip.h>
+#include <tuple>
 
 #pragma comment(lib,"ws2_32.lib") //Winsock Library
 
@@ -22,5 +23,8 @@ using namespace concurrency;
 
 //void startServiceSeeker();
 
-void startSocketUDPListen();
-void startSocketUDPSend();
+void startSocketUDPNListen();
+std::tuple<int*, sockaddr_in*> startSocketUDPSend();
+void sendDataUDP(SOCKET s, sockaddr_in* si_other, FLOAT** pBuffer, UINT32 nBufferOffset);
+void sendDataUDP_debug(SOCKET s, sockaddr_in* si_other, const char* buf);
+void closeSocket(SOCKET s);

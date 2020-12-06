@@ -3,9 +3,10 @@
 
 int main(void)
 {
-	startSocketUDPListen();
-	/*
-	for(int i = 0;i<100000000;i++){
-		startSocketUDPSend();
-	}*/
+	//startSocketUDPNListen();
+	auto [s_ptr, sockaddr_ptr] = startSocketUDPSend();
+	const char* test = "dit is een test";
+	while(1){
+	sendDataUDP_debug(*s_ptr, sockaddr_ptr, test);
+	}
 }
