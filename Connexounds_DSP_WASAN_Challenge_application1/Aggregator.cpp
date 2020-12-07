@@ -1,21 +1,21 @@
 /*
     TODO: 
-        I. support dynamic updates to the aggregator like:
-            1. Addition/removal of capture devices.
-            2. Sample-rate conversion.
-            3. Output channel mask changes.
-            4. Circular buffer size.
-        II. multithread the aggregator so that each thread is responsible for each set of functionality:
-            a. Control lane for communication with JUCE/DSP.
-            b. Capture and pre-processing of data.
-        III. convert class into a thread-safe Singleton.
-        IV. facilitate modularity for cross-platform portability.
-        V. provide better device friendly names (i.e Max's Airpods, etc.)
-        VI. convert class into a thread-safe Singleton.
-        VII. turn into a separate thread to provide additional functionality without waiting 
-            for CPU or delaying processing of incoming data.
-        IIX. incorporate more user input verification.
-        IX. check if the input is actually a number (atoi is not safe if input is not an integer)
+        I.------support dynamic updates to the aggregator like:
+                1. Addition/removal of capture devices.
+                2. Sample-rate conversion.
+                3. Output channel mask changes.
+                4. Circular buffer size.
+        II.-----multithread the aggregator so that each thread is responsible for each set of functionality:
+                a. Control lane for communication with JUCE/DSP.
+                b. Capture and pre-processing of data.
+        III.----convert class into a thread-safe Singleton.
+        IV.-----facilitate modularity for cross-platform portability.
+        V.------provide better device friendly names (i.e Max's Airpods, etc.)
+        VI.-----convert class into a thread-safe Singleton.
+        VII.----turn into a separate thread to provide additional functionality without waiting 
+                for CPU or delaying processing of incoming data.
+        IIX.----incorporate more user input verification.
+        IX.-----check if the input is actually a number (atoi is not safe if input is not an integer)
 */
 
 #include "Aggregator.h"

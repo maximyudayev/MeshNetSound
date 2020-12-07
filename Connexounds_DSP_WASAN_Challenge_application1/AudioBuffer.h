@@ -11,7 +11,6 @@
 #include "config.h"
 #include "Resampler.h"
 
-
 class AudioBuffer
 {
 	public:

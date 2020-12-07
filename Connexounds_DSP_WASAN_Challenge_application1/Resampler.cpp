@@ -1,17 +1,17 @@
 /*
     TODO:
-        I. convert code to fixed-point arithmetic for performance gain and control.
-        II. optimize filtering operations by reducing number of redundant floating point operations.
-        III. update Resampler::Resample() to start from smallest coefficients in both wings to
-             increase precision of the floating point numbers.
-        IV. refactor Resampler::Resample() to avoid extra calculation if no interpolation is needed.
-        V. optimize Resampler::Resample() to skip interpolation of samples for which original data
-           already exists (i.e for which Ph == 0).
+        I.------convert code to fixed-point arithmetic for performance gain and control.
+        II.-----optimize filtering operations by reducing number of redundant floating point operations.
+        III.----update Resampler::Resample() to start from smallest coefficients in both wings to
+                increase precision of the floating point numbers.
+        IV.-----refactor Resampler::Resample() to avoid extra calculation if no interpolation is needed.
+        V.------optimize Resampler::Resample() to skip interpolation of samples for which original data
+                already exists (i.e for which Ph == 0).
+        VI.-----improve quality of audio signal by including NzFs/F's or Nz past and future samples in
+                the filtering operation.
 */
 
 #include "Resampler.h"
-
-RESAMPLERPARAMS	Resampler::tResamplerParams;
 /*
  * reference: "Digital Filters, 2nd edition"
  *            R.W. Hamming, pp. 178-179
@@ -35,6 +35,8 @@ RESAMPLERPARAMS	Resampler::tResamplerParams;
  *               8.960   5.7     0.000275  -90
  *               10.056  6.4     0.000087  -100
  */
+
+RESAMPLERPARAMS	Resampler::tResamplerParams;
 
 /// <summary>
 /// <para>Resampler constructor.</para>

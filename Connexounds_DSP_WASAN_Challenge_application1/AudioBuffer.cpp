@@ -1,13 +1,13 @@
 /*
     TODO:
-        I. make possible to update endpoint buffer length on demand.
-        II. expand versatility by checking the actual audio format.
-        III. at compile or run time request user about the intended size of WASAN
-            and choose bit width of the nChannels and all corresponding 
-            supporting variables accordingly.
-        IV. add intelligence to the function to choose time- vs. frequency-based resampling,
-            depending on the size of the RESAMPLEFMT_T.pBuffer.
-        V. provide for case when silence was written to file.
+        I.------make possible to update endpoint buffer length on demand.
+        II.-----expand versatility by checking the actual audio format.
+        III.----at compile or run time request user about the intended size of WASAN
+                and choose bit width of the nChannels and all corresponding 
+                supporting variables accordingly.
+        IV.-----add intelligence to the function to choose time- vs. frequency-based resampling,
+                depending on the size of the RESAMPLEFMT_T.pBuffer.
+        V.------provide for case when silence was written to file.
 */
 
 #include "AudioBuffer.h"
