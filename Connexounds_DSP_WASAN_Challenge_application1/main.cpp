@@ -1,3 +1,10 @@
+/*
+    TODO:
+        I.------enforce conventions across entire project.
+		II.-----incorporate threading to parallelize work of audio capture, audio render,
+				and resampling operations; don't forget synchronization mechanisms.
+*/
+
 #include "Aggregator.h"
 #include <iostream>
 
@@ -27,10 +34,10 @@ int main(int argc, char* argv[])
 	
 	hr = pAggregator.Initialize();
 	
-	hr = pAggregator.Start();
+	hr = pAggregator.StartCapture();
 
 #ifndef DEBUG
-	//hr = pAggregator.Stop();
+	//hr = pAggregator.StopCapture();
 #endif
 
 	return hr;

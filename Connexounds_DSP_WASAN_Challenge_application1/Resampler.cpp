@@ -205,7 +205,7 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
             FLOAT* X = (FLOAT*)pData + ((UINT32)fCurrentTime) * tEndpointFmt.nChannels;
             
             // Make note of the next cell's offset to reduce computational cost
-            UINT32 position = (tResampleFmt.nBufferOffset + nFramesWritten) % *tResampleFmt.nBufferSize;
+            UINT32 position = (tResampleFmt.nWriteOffset + nFramesWritten) % *tResampleFmt.nBufferSize;
 
             // Clear current ring buffer pointed cell for each channel
             for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
@@ -229,13 +229,13 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                 HEnd = &tResamplerParams.pImp[tResamplerParams.nNh];            // Length of table + 1 to compare using < inside loops
 
                 // TODO: correct the intended use of this if-statement
-                if (bRight)		                        // If doing right wing...              
-                {				                        // ...drop extra coeff, so when Ph is  
-                    HEnd--;			                    //    0.5, we don'dummy do too many mult's 
-                    if (Ph == 0)		                // If the phase is zero...             
-                    {			                        // ...then we've already skipped the   
-                        Hp += (UINT32)dh;	            //    first sample, so we must also    
-                        Hdp += (UINT32)dh;	            //    skip ahead in *pImp and *pImpD   
+                if (bRight)
+                {
+                    HEnd--;
+                    if (Ph == 0)
+                    {
+                        Hp += (UINT32)dh;
+                        Hdp += (UINT32)dh;  
                     }
                 }
 
@@ -296,7 +296,7 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
             FLOAT* X = (FLOAT*)pData + ((UINT32)fCurrentTime) * tEndpointFmt.nChannels;
 
             // Make note of the next cell's offset to reduce computational cost
-            UINT32 position = (tResampleFmt.nBufferOffset + nFramesWritten) % *tResampleFmt.nBufferSize;
+            UINT32 position = (tResampleFmt.nWriteOffset + nFramesWritten) % *tResampleFmt.nBufferSize;
 
             // Clear current ring buffer pointed cell for each channel
             for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)

@@ -8,6 +8,10 @@
         IV.-----add intelligence to the function to choose time- vs. frequency-based resampling,
                 depending on the size of the RESAMPLEFMT_T.pBuffer.
         V.------provide for case when silence was written to file.
+        VI.-----convert implementation of grouping into a separate class that contains AudioBuffer instances.
+        VII.----split AudioBuffer into 2 child classes, SinkBuffer and SourceBuffer, which inherit common
+                function from AudioBuffer.
+        IIX.----add additional offset variable to account for time delay adjustment.
 */
 
 #include "AudioBuffer.h"
@@ -17,8 +21,11 @@
 /// <para>Keeps track of the number of instances created and is useful
 /// for objects to know their order of indices.</para>
 /// </summary>
-UINT32 AudioBuffer::nNewChannelOffset{ 0 };
+UINT32* AudioBuffer::pNewChannelOffset{ NULL };
+UINT32* AudioBuffer::pGroupId{ NULL };
 UINT32 AudioBuffer::nNewInstance{ 0 };
+UINT32 AudioBuffer::nNewGroupId{ 0 };
+UINT32 AudioBuffer::nGroups{ 0 };
 
 /// <summary>
 /// <para>AudioBuffer constructor.</para>
@@ -34,15 +41,20 @@ UINT32 AudioBuffer::nNewInstance{ 0 };
 /// variable, along with the variable itself, must be updated to the desired bit width
 /// (i.e. UINT8, UINT16, UINT32, UINT64).</para>
 /// </summary>
-/// <param name="filename">- stores filename used for writing WAV files</param>
-AudioBuffer::AudioBuffer(std::string filename)
+/// <param name="filename">- stores filename used for writing WAV files.</param>
+/// <param name="nMember">- stores AudioBuffer group membership ID to cluster by ring buffer membership.</param>
+AudioBuffer::AudioBuffer(std::string filename, UINT32 nMember)
 {
     sFilename = filename;
+    
+    // Indicate affiliation of this AudioBuffer instance to a group
+    // for clustering AudioBuffers by membership to a ring buffer
+    nMemberId = nMember;
 
     // Indicate to this AudioBuffer instance its identifier
     nInstance = AudioBuffer::nNewInstance;
     // Update the new instance identifier for the next Class member
-    AudioBuffer::nNewInstance ++;
+    AudioBuffer::nNewInstance++;
 
     pResampler = new Resampler();
 }
@@ -106,6 +118,111 @@ AudioBuffer::~AudioBuffer()
 }
 
 /// <summary>
+/// <para>Creates an alias for a group of AudioBuffer's to separate each by
+/// membership to a particular ring buffer.</para>
+/// </summary>
+/// <param name="pGroup">- pointer to the location to store group membership ID.</param>
+/// <returns></returns>
+HRESULT AudioBuffer::CreateBufferGroup(UINT32* pGroup)
+{
+    if (AudioBuffer::nGroups == 0)
+    {
+        pNewChannelOffset   = (UINT32*)malloc(sizeof(UINT32));
+        pGroupId            = (UINT32*)malloc(sizeof(UINT32));
+        
+        if (pNewChannelOffset == NULL ||
+            pGroupId == NULL)
+            return ENOMEM;
+    }
+    else
+    {
+        // Resize array of new channel offsets
+        UINT32* dummyChannel    = (UINT32*)realloc(pNewChannelOffset, (AudioBuffer::nGroups + 1) * sizeof(UINT32));
+        UINT32* dummyGroup      = (UINT32*)realloc(pGroupId, (AudioBuffer::nGroups + 1) * sizeof(UINT32));
+        
+        if (dummyChannel != NULL &&
+            dummyGroup != NULL)
+        {
+            pNewChannelOffset = dummyChannel;
+            pGroupId = dummyGroup;
+        }
+        else
+            return ENOMEM;
+    }
+    // Set the channel offset of the new group to 0
+    pNewChannelOffset[AudioBuffer::nGroups] = 0;
+
+    // Write the "GUID" of the group into the user variable
+    *pGroup = AudioBuffer::nNewGroupId++;
+
+    // Write the index of the new group into the array of "GUID's"
+    pGroupId[AudioBuffer::nGroups] = *pGroup;
+    
+    // Increment the number of existing groups
+    AudioBuffer::nGroups++;
+
+    return ERROR_SUCCESS;
+}
+
+/// <summary>
+/// <para>Retreives static array index corresponding to nGroup "GUID"
+/// to index into corresponding static channel offset.</para>
+/// </summary>
+/// <param name="nGroup">- the group "GUID" to look up array index for.</param>
+/// <returns></returns>
+UINT32 AudioBuffer::GetBufferGroupIndex(UINT32 nGroup)
+{
+    UINT32 id = 0;
+    while (AudioBuffer::pGroupId[id] != nGroup && id < AudioBuffer::nGroups) id++;
+
+    return id;
+}
+
+/// <summary>
+/// <para>Removes AudioBuffer group's index from array of existing ones,
+/// decrements the number of groups remaining.</para>
+/// </summary>
+/// <param name="nGroup">- the group "GUID" to remove.</param>
+/// <returns></returns>
+HRESULT AudioBuffer::RemoveBufferGroup(UINT32 nGroup)
+{
+    if (AudioBuffer::nGroups == 1)
+    {
+        free(AudioBuffer::pNewChannelOffset);
+        free(AudioBuffer::pGroupId);
+        AudioBuffer::nNewGroupId = 0;
+    }
+    else
+    {
+        UINT32 id = GetBufferGroupIndex(nGroup);
+
+        // Remove this GUID and align all other GUID positions with the new length of the array
+        for (UINT32 i = 0, j = 0; j < AudioBuffer::nGroups; i++, j++)
+        {
+            if (j == id) j++;
+            AudioBuffer::pGroupId[i] = AudioBuffer::pGroupId[j];
+        }
+
+        // Reduce heap space for the arrays
+        UINT32* dummyChannel = (UINT32*)realloc(pNewChannelOffset, (AudioBuffer::nGroups - 1) * sizeof(UINT32));
+        UINT32* dummyGroup = (UINT32*)realloc(pGroupId, (AudioBuffer::nGroups - 1) * sizeof(UINT32));
+
+        if (dummyChannel != NULL &&
+            dummyGroup != NULL)
+        {
+            pNewChannelOffset = dummyChannel;
+            pGroupId = dummyGroup;
+        }
+        else
+            return ENOMEM;
+    }
+
+    AudioBuffer::nGroups--;
+
+    return ERROR_SUCCESS;
+}
+
+/// <summary>
 /// <para>Copies WAVEFORMATEX data received from WASAPI for all audio related operations.</para>
 /// </summary>
 /// <remarks>
@@ -165,7 +282,8 @@ HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBu
 
     tResampleFmt.pBuffer = pCircularBuffer;
     tResampleFmt.nBufferSize = nCircularBufferSize;
-    tResampleFmt.nBufferOffset = 0;
+    tResampleFmt.nWriteOffset = 0;
+    tResampleFmt.nReadOffset = 0;
     tResampleFmt.nUpsample = nUpsample;
     tResampleFmt.nDownsample = nDownsample;
     tResampleFmt.fFactor = (FLOAT)nUpsample / (FLOAT)nDownsample;
@@ -175,10 +293,11 @@ HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBu
     
     std::cout << MSG "The resample factor of device " << nInstance << " is: " << tResampleFmt.fFactor << std::endl;
 
+    UINT32 id = AudioBuffer::GetBufferGroupIndex(nMemberId);
     // Indicate to this AudioBuffer instance its absolute buffer channel position
-    nChannelOffset = AudioBuffer::nNewChannelOffset;
+    nChannelOffset = AudioBuffer::pNewChannelOffset[id];
     // Update the new channel position for the next Class member
-    AudioBuffer::nNewChannelOffset += tEndpointFmt.nChannels;
+    AudioBuffer::pNewChannelOffset[id] += tEndpointFmt.nChannels;
 
     return ERROR_SUCCESS;
 }
@@ -291,7 +410,7 @@ HRESULT AudioBuffer::InitWAV()
 /// <param name="pData">- pointer to the first byte into the endpoint's newly captured packet</param>
 /// <param name="bDone">- address of the variable responsible for terminating the program</param>
 /// <returns></returns>
-HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
+HRESULT AudioBuffer::PullData(BYTE* pData, BOOL* bDone)
 {
     BYTE* pDataDummy = pData;
     UINT32 nSamplesWritten = 0;
@@ -301,7 +420,7 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
     
     // Modulo operator allows to go in circular fashion so no code duplication is required
 
-    // When user calls AudioBuffer::CopyData with pData = NULL, AUDCLNT_BUFFERFLAGS_SILENT flag is set
+    // When user calls AudioBuffer::PullData with pData = NULL, AUDCLNT_BUFFERFLAGS_SILENT flag is set
     // results in keeping 0's bulk set in previous step in the audio buffer data structure
     if (pData != NULL)
     {
@@ -323,9 +442,9 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
                 for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
                 {
                     // If data was filled at most up to the end of memory allocated for ring buffer
-                    if (tResampleFmt.nBufferOffset + nSamplesWritten <= *(tResampleFmt.nBufferSize))
+                    if (tResampleFmt.nWriteOffset + nSamplesWritten <= *(tResampleFmt.nBufferSize))
                         // Write to file data from ring buffer from the previous offset up till the number of resampled frames
-                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset, 
+                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nWriteOffset, 
                             sizeof(FLOAT), 
                             nSamplesWritten, 
                             fResampledOutputFiles[i]);
@@ -333,15 +452,15 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
                     else
                     {
                         // Write data to file from ring buffer's offset up till the end of the ring buffer
-                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nBufferOffset,
+                        fwrite(tResampleFmt.pBuffer[nChannelOffset + i] + tResampleFmt.nWriteOffset,
                             sizeof(FLOAT),
-                            *tResampleFmt.nBufferSize - tResampleFmt.nBufferOffset,
+                            *tResampleFmt.nBufferSize - tResampleFmt.nWriteOffset,
                             fResampledOutputFiles[i]);
                         
                         // Write data to file from ring buffer's beginnig up till the remaining number of resampled frames
                         fwrite(tResampleFmt.pBuffer[nChannelOffset + i],
                             sizeof(FLOAT),
-                            (tResampleFmt.nBufferOffset + nSamplesWritten) % *tResampleFmt.nBufferSize, 
+                            (tResampleFmt.nWriteOffset + nSamplesWritten) % *tResampleFmt.nBufferSize, 
                             fResampledOutputFiles[i]);
                     }
                 }
@@ -353,7 +472,7 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
             pDataDummy = pData;
             for (UINT32 j = 0; j < *tEndpointFmt.nBufferSize; j++, pDataDummy += tEndpointFmt.nBlockAlign)
                 for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
-                    *(tResampleFmt.pBuffer[nChannelOffset + i] + (tResampleFmt.nBufferOffset + j) % *tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
+                    *(tResampleFmt.pBuffer[nChannelOffset + i] + (tResampleFmt.nWriteOffset + j) % *tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
         }
     }
     else
@@ -362,8 +481,16 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
     }
 
     //-------------------- End --------------------//
+    UINT32 dummy = tResampleFmt.nWriteOffset;
     // Update the offset to position after the last frame of the current chunk
-    tResampleFmt.nBufferOffset = (tResampleFmt.nBufferOffset + nSamplesWritten) % *tResampleFmt.nBufferSize;
+    tResampleFmt.nWriteOffset = (tResampleFmt.nWriteOffset + nSamplesWritten) % *tResampleFmt.nBufferSize;
+
+    // If write offset exceeded read offset by a whole lap, update read offset to the position of write offset,
+    // hence drop frames that were delayed and try to catch up from the new position
+    if ((dummy >= tResampleFmt.nReadOffset && tResampleFmt.nWriteOffset > tResampleFmt.nReadOffset && tResampleFmt.nWriteOffset < dummy) ||
+        (dummy <= tResampleFmt.nReadOffset && tResampleFmt.nWriteOffset < tResampleFmt.nReadOffset && tResampleFmt.nWriteOffset < dummy) ||
+        (dummy <= tResampleFmt.nReadOffset && tResampleFmt.nWriteOffset > tResampleFmt.nReadOffset))
+        tResampleFmt.nReadOffset = tResampleFmt.nWriteOffset;
 
 #ifdef DEBUG
     // Stops capture, used for debugging
@@ -371,4 +498,38 @@ HRESULT AudioBuffer::CopyData(BYTE* pData, BOOL* bDone)
 #endif // DEBUG
 
     return ERROR_SUCCESS;
+}
+
+/// <summary>
+/// <para>Pushes data of the AudioBuffer into a corresponding render endpoint device.</para>
+/// <para>Note: data in the buffer must already be resampled, in PullData step, to adjust sample
+/// rate specifically to the device to which AudioBuffer will be outputting.</para>
+/// <para>Note: does not yet enforce matching dimensions between AudioBuffer and destination
+/// render endpoint device.</para>
+/// </summary>
+/// <param name="pData"></param>
+/// <param name="nFrames"></param>
+/// <returns></returns>
+HRESULT AudioBuffer::PushData(BYTE* pData, UINT32 nFrames)
+{
+    // Push nFrames from the ring buffer into the endpoint buffer for playback
+    for (UINT32 j = 0; j < nFrames; j++, pData += tEndpointFmt.nBlockAlign)
+        for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
+            *(((FLOAT*)pData) + i) = *(tResampleFmt.pBuffer[nChannelOffset + i] + (tResampleFmt.nReadOffset + j) % *tResampleFmt.nBufferSize);
+
+    // Update read pointer respecting the circular buffer traversal
+    tResampleFmt.nReadOffset = (tResampleFmt.nReadOffset + nFrames) % *tResampleFmt.nBufferSize;
+
+    return ERROR_SUCCESS;
+}
+
+/// <summary>
+/// <para>Gets the number of frames in the buffer available for reading.</para>
+/// </summary>
+/// <returns></returns>
+UINT32 AudioBuffer::FramesAvailable()
+{   
+    return (tResampleFmt.nWriteOffset > tResampleFmt.nReadOffset) ? 
+                    (tResampleFmt.nWriteOffset - tResampleFmt.nReadOffset) :                            // data to read is linear
+                    (*tResampleFmt.nBufferSize - tResampleFmt.nReadOffset + tResampleFmt.nWriteOffset); // data to read is circular
 }

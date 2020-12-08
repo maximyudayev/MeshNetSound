@@ -25,6 +25,9 @@
 #endif
 
 //-------- Aggregator Macros
+#define AGGREGATOR_RENDER 0
+#define AGGREGATOR_CAPTURE 1
+
 #ifndef AGGREGATOR_SAMPLE_FREQ
     #define AGGREGATOR_SAMPLE_FREQ 44100            // sampling frequency of circular buffer for DSP consumption
 #endif

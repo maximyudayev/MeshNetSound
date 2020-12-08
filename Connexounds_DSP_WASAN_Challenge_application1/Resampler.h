@@ -7,7 +7,7 @@
 #include <string.h>
 #include "config.h"
 
-// Type Definitions of AudioBuffer
+//-------- Type Definitions of AudioBuffer (placed here to avoid circular dependency error)
 typedef struct endpointfmt {
 	UINT32* nBufferSize; // not fixed because number of frames is dictated by WASAPI due to AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY
 	WORD nBlockAlign;
@@ -25,14 +25,15 @@ typedef struct endpointfmt {
 
 typedef struct resamplefmt {
 	FLOAT** pBuffer;
-	UINT32 nBufferOffset;
+	UINT32 nWriteOffset;
+	UINT32 nReadOffset;
 	UINT32* nBufferSize;
 	DWORD nUpsample;
 	DWORD nDownsample;
 	FLOAT fFactor;
 } RESAMPLEFMT;
 
-// Type Definitions of Resampler
+//-------- Type Definitions of Resampler
 typedef struct resampler {
 	FLOAT* pImp;	// Filter coefficients
 	FLOAT* pImpD;	// Filter coefficient deltas
