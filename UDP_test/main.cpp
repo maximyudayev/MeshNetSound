@@ -3,10 +3,12 @@
 
 int main(void)
 {
-	//startSocketUDPNListen();
-	auto [s_ptr, sockaddr_ptr] = startSocketUDPSend();
+	auto [s, sockaddr_server,sockaddr_si_other] = startSocketUDPListen();
+
+	/*
+	auto [s, sockaddr] = startSocketUDPSend();
 	const char* test = "dit is een test";
 	while(1){
-	sendDataUDP_debug(*s_ptr, sockaddr_ptr, test);
-	}
+	sendDataUDP_debug(s,sockaddr, test);
+	}*/
 }

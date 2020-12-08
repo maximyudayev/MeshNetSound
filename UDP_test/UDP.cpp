@@ -1,6 +1,6 @@
 #include "UDP.h"
 
-
+//WifiDirectServices code
 /*
 void startAdvertiser() {
 	//create a new Service Advertiser, servicename should be string
@@ -53,14 +53,10 @@ void startServiceSeeker() {
 }
 */
 
-void startSocketUDPNListen() {
+std::tuple<int, sockaddr_in,sockaddr_in> startSocketUDPListen() {
 	SOCKET s;
 	struct sockaddr_in server, si_other;
-	int slen, recv_len;
-	char buf[255];
 	WSADATA wsa;
-
-	slen = sizeof(si_other);
 
 	//Initialise winsock
 	printf("\nInitialising Winsock...");
@@ -90,36 +86,56 @@ void startSocketUDPNListen() {
 		exit(EXIT_FAILURE);
 	}
 	puts("Bind done");
+	
+	return { s,server,si_other };
+}
 
+void receiveDataUDP(SOCKET s, sockaddr_in si_other, FLOAT** pBuffer, UINT32 nBufferOffset) {
+	int recv_len,slen;
+	char* buf;
+
+	slen = sizeof(si_other);
 	while (1)
 	{
 		printf("Waiting for data...");
 		fflush(stdout);
 
 		//clear the buffer by filling null, it might have previously received data
-		memset(buf, '\0', 255);
+		memset(buf, '\0', 255); //255 hangt af van packet length 
 
-		//try to receive some data, this is a blocking call
-		if ((recv_len = recvfrom(s, buf, 255, 0, (struct sockaddr*)&si_other, &slen)) == SOCKET_ERROR)
-		{
-			printf("recvfrom() failed with error code : %d", WSAGetLastError());
-			exit(EXIT_FAILURE);
+		for (UINT32 i = 0; i < 2; i++) {//2 = amount of channels
+			//try to receive some data, this is a blocking call
+			if ((recv_len = recvfrom(s, buf, 255, 0, (struct sockaddr*)&si_other, &slen)) == SOCKET_ERROR)
+			{
+				*(pBuffer[i] + (nBufferOffset) % 16) = *(((FLOAT*)buf) + i);
+			}
 		}
-		
-		//print details of the client/peer and the data received
-		//printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-		printf("Data: %s\n", buf);
-
 	}
-	closesocket(s);
-	WSACleanup();
 }
 
-std::tuple<int*,sockaddr_in*> startSocketUDPSend() {
+void receiveDataUDP_debug(SOCKET s, sockaddr_in si_other) {
+	int recv_len, slen;
+	char* buf;
+
+	slen = sizeof(si_other);
+	while (1)
+	{
+		printf("Waiting for data...");
+		fflush(stdout);
+
+		//clear the buffer by filling null, it might have previously received data
+		memset(buf, '\0', 255); //255 hangt af van packet length 
+
+		if ((recv_len = recvfrom(s, buf, 255, 0, (struct sockaddr*)&si_other, &slen)) == SOCKET_ERROR)
+		{
+			printf("Data: %s\n", buf);
+		}
+	}
+}
+
+std::tuple<int,sockaddr_in> startSocketUDPSend() {
 	struct sockaddr_in si_other;
 	int s, slen = sizeof(si_other);
-	char buf[255];
-	char message[255] = "dit is een test";
 	WSADATA wsa;
 
 	//Initialise winsock
@@ -142,20 +158,26 @@ std::tuple<int*,sockaddr_in*> startSocketUDPSend() {
 	memset((char*)&si_other, 0, sizeof(si_other));
 	si_other.sin_family = AF_INET;
 	si_other.sin_port = htons(8888);
-	inet_pton(AF_INET, "127.0.0.1", &si_other.sin_addr);
-	return { &s,&si_other };
+	inet_pton(AF_INET, "192.168.137.1", &si_other.sin_addr);
+	return { s,si_other };
 }
 
-void sendDataUDP(SOCKET s, sockaddr_in* si_other, FLOAT** pBuffer, UINT32 nBufferOffset) {
+void sendDataUDP(SOCKET s, sockaddr_in si_other, FLOAT** pBuffer, UINT32 nBufferOffset) {
+	//get the data, i assume i know how many channels there are in the aggregator otherwise max fix plz
+	char* buf; //do i need initialization ?
 
-	if (sendto(s, message, strlen(message), 0, (struct sockaddr*) &si_other, sizeof(si_other)) == SOCKET_ERROR)
+	for (UINT32 i = 0; i < 2; i++){//2 = amount of channels
+		memcpy((pBuffer[i] + (nBufferOffset) % 16), buf, 16);  //assume 16 bytes !!
+	}
+
+	if (sendto(s, buf, sizeof(buf), 0, (struct sockaddr*) &si_other, sizeof(si_other)) == SOCKET_ERROR)
 	{
 		printf("sendto() failed with error code : %d", WSAGetLastError());
 		exit(EXIT_FAILURE);
 	}
 }
 
-void sendDataUDP_debug(SOCKET s, sockaddr_in* si_other, const char* test) {
+void sendDataUDP_debug(SOCKET s, sockaddr_in si_other, const char* test) {
 
 	if (sendto(s, test, strlen(test), 0, (struct sockaddr*)&si_other, sizeof(si_other)) == SOCKET_ERROR)
 	{
