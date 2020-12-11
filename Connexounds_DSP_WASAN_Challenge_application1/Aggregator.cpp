@@ -91,14 +91,14 @@ Aggregator::~Aggregator()
         if (pwfx[j] != NULL)                    free(pwfx[j]);
         if (pAudioBuffer[j] != NULL)            free(pAudioBuffer[j]);
         if (pData[j] != NULL)                   free(pData[j]);
-        if (nGCD[j] != NULL)                    free(nGCD);
-        if (nGCDDiv[j] != NULL)                 free(nGCDDiv);
-        if (nGCDTFreqDiv[j] != NULL)            free(nGCDTFreqDiv);
-        if (nUpsample[j] != NULL)               free(nUpsample);
-        if (nDownsample[j] != NULL)             free(nDownsample);
-        if (nEndpointBufferSize[j] != NULL)     free(nEndpointBufferSize);
-        if (nEndpointPackets[j] != NULL)        free(nEndpointPackets);
-        if (flags[j] != NULL)                   free(flags);
+        if (nGCD[j] != NULL)                    free(nGCD[j]);
+        if (nGCDDiv[j] != NULL)                 free(nGCDDiv[j]);
+        if (nGCDTFreqDiv[j] != NULL)            free(nGCDTFreqDiv[j]);
+        if (nUpsample[j] != NULL)               free(nUpsample[j]);
+        if (nDownsample[j] != NULL)             free(nDownsample[j]);
+        if (nEndpointBufferSize[j] != NULL)     free(nEndpointBufferSize[j]);
+        if (nEndpointPackets[j] != NULL)        free(nEndpointPackets[j]);
+        if (flags[j] != NULL)                   free(flags[j]);
     }
 
     //-------- Free LP Filter memory of the Resampler class
@@ -183,6 +183,10 @@ HRESULT Aggregator::Initialize()
     hr = InitializeRender();
         EXIT_ON_ERROR(hr)
 
+    //-------- If initialization succeeded, return with S_OK
+    return hr;
+
+    //-------- If initialization failed at any of above steps, clean up memory prior to next attempt
 Exit:
     SAFE_RELEASE(pEnumerator)
 
@@ -570,6 +574,10 @@ HRESULT Aggregator::InitializeRender()
             EXIT_ON_ERROR(hr)
     }
 
+    //-------- If initialization succeeded, return with S_OK
+    return hr;
+
+    //-------- If initialization failed at any of above steps, clean up memory prior to next attempt
 Exit:
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
     {
