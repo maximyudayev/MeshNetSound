@@ -138,12 +138,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\UDP\UDP.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="AudioBuffer.cpp" />
     <ClCompile Include="Aggregator.cpp" />
     <ClCompile Include="Resampler.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\UDP\UDP.h" />
     <ClInclude Include="Aggregator.h" />
     <ClInclude Include="AudioBuffer.h" />
     <ClInclude Include="config.h" />

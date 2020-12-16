@@ -27,6 +27,8 @@
 //-------- Aggregator Macros
 #define AGGREGATOR_RENDER 0
 #define AGGREGATOR_CAPTURE 1
+#define AGGREGATOR_CIN_IP_LEN 16                    // standard in stream buffer length for IP address
+#define AGGREGATOR_CIN_DEVICEID_LEN 11              // standard in stream buffer length for device ID
 
 #ifndef AGGREGATOR_SAMPLE_FREQ
     #define AGGREGATOR_SAMPLE_FREQ 44100            // sampling frequency of circular buffer for DSP consumption

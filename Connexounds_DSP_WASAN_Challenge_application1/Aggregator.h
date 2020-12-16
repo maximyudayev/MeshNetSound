@@ -27,6 +27,8 @@ class Aggregator
 	private:
 		HRESULT ListAvailableDevices(UINT8 nDeviceType);
 		HRESULT GetUserChoiceDevices(UINT8 nDeviceType);
+		HRESULT GetWASANNodes(UINT8 nDeviceType);
+		HRESULT GetWASAPIDevices(UINT8 nDeviceType);
 		HRESULT InitializeCapture();
 		HRESULT InitializeRender();
 		DWORD gcd(DWORD a, DWORD b);
@@ -60,6 +62,7 @@ class Aggregator
 								nCircularBufferSize[2]	{ AGGREGATOR_CIRCULAR_BUFFER_SIZE, AGGREGATOR_CIRCULAR_BUFFER_SIZE },
 								nAllDevices[2]			{ 0 },
 								nDevices[2]				{ 0 },
+								nWASANNodes[2]			{ 0 },
 								* nEndpointBufferSize[2]{ NULL },
 								* nEndpointPackets[2]	{ NULL },
 								* pAudioBufferGroupId	{ NULL };
@@ -70,4 +73,6 @@ class Aggregator
 								* nGCD[2]				{ NULL },
 								* nGCDDiv[2]			{ NULL },
 								* nGCDTFreqDiv[2]		{ NULL };
+
+		CHAR					* pWASANNodeIP[2]		{ NULL };
 };

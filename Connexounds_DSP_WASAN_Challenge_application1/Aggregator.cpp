@@ -21,6 +21,10 @@
         XI.-----ensure graceful Exit strategy in all methods, currently not all scenarios are considered
                 and not all memory is freed.
         XII.----provide safety when an audio device is removed, hot plugged while program is running.
+        XIII.---do CLI user input validation.
+        XIV.----negotiate WASAN node metadata across participating nodes to establish stream format dynamically.
+        XV.-----create an optimally sized for target PC thread pool to process in parallel audio streams.
+        XVI.----consider adapting wireless code into an inheriting WASAPI audio client class.
 */
 
 #include "Aggregator.h"
@@ -87,6 +91,7 @@ Aggregator::~Aggregator()
         // Free dynamic arrays holding reference to all these variables as last step
         if (pDeviceAll[j] != NULL)              free(pDeviceAll[j]);
         if (pDevice[j] != NULL)                 free(pDevice[j]);
+        if (pWASANNodeIP[j] != NULL)            free(pWASANNodeIP[j]);
         if (pAudioClient[j] != NULL)            free(pAudioClient[j]);
         if (pwfx[j] != NULL)                    free(pwfx[j]);
         if (pAudioBuffer[j] != NULL)            free(pAudioBuffer[j]);
@@ -122,7 +127,7 @@ Aggregator::~Aggregator()
 /// <returns></returns>
 HRESULT Aggregator::Initialize()
 {
-    HRESULT hr = S_OK;
+    HRESULT hr = ERROR_SUCCESS;
     UINT32 attempt = 0;
 
     //-------- Initialize Aggregator basics
@@ -142,7 +147,7 @@ HRESULT Aggregator::Initialize()
     do
     {
         hr = ListAvailableDevices(AGGREGATOR_CAPTURE);
-    } while (hr != S_OK && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+    } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
         EXIT_ON_ERROR(hr)
 
     //-------- Try to get user choice of capture devices AGGREGATOR_OP_ATTEMPTS times
@@ -150,7 +155,7 @@ HRESULT Aggregator::Initialize()
     do
     {
         hr = GetUserChoiceDevices(AGGREGATOR_CAPTURE);
-    } while (hr != S_OK && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+    } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
         EXIT_ON_ERROR(hr)
 
     //-------- Try to list all available render devices AGGREGATOR_OP_ATTEMPTS times
@@ -158,7 +163,7 @@ HRESULT Aggregator::Initialize()
     do
     {
         hr = ListAvailableDevices(AGGREGATOR_RENDER);
-    } while (hr != S_OK && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+    } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
         EXIT_ON_ERROR(hr)
 
     //-------- Try to get user choice of render devices AGGREGATOR_OP_ATTEMPTS times
@@ -166,13 +171,13 @@ HRESULT Aggregator::Initialize()
     do
     {
         hr = GetUserChoiceDevices(AGGREGATOR_RENDER);
-    } while (hr != S_OK && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+    } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
         EXIT_ON_ERROR(hr)
 
     //---------------- Initialization ----------------//
 
     // allocate space for indices of 1 input ring buffer and 1 output ring buffer 
-    pAudioBufferGroupId = (UINT32*)malloc(2 * sizeof(UINT32));  
+    pAudioBufferGroupId = (UINT32*)malloc(2 * sizeof(UINT32));
 
     //-------- Initialize LP Filter of the Resampler class
     Resampler::InitLPFilter(FALSE, RESAMPLER_ROLLOFF_FREQ, RESAMPLER_BETA, RESAMPLER_L_TWOS_EXP);
@@ -204,17 +209,16 @@ HRESULT Aggregator::InitializeCapture()
     HRESULT hr = ERROR_SUCCESS;
 
     //-------- Use information obtained from user inputs to dynamically create the system
-
     pAudioClient[AGGREGATOR_CAPTURE]            = (IAudioClient**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(IAudioClient*));
-    pwfx[AGGREGATOR_CAPTURE]                    = (WAVEFORMATEX**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(WAVEFORMATEX*));
+    pwfx[AGGREGATOR_CAPTURE]                    = (WAVEFORMATEX**)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(WAVEFORMATEX*));
     pCaptureClient                              = (IAudioCaptureClient**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(IAudioCaptureClient*));
-    pAudioBuffer[AGGREGATOR_CAPTURE]            = (AudioBuffer**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(AudioBuffer*));
+    pAudioBuffer[AGGREGATOR_CAPTURE]            = (AudioBuffer**)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(AudioBuffer*));
     pData[AGGREGATOR_CAPTURE]                   = (BYTE**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(BYTE*));
-    nGCD[AGGREGATOR_CAPTURE]                    = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
-    nGCDDiv[AGGREGATOR_CAPTURE]                 = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
-    nGCDTFreqDiv[AGGREGATOR_CAPTURE]            = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
-    nUpsample[AGGREGATOR_CAPTURE]               = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
-    nDownsample[AGGREGATOR_CAPTURE]             = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
+    nGCD[AGGREGATOR_CAPTURE]                    = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
+    nGCDDiv[AGGREGATOR_CAPTURE]                 = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
+    nGCDTFreqDiv[AGGREGATOR_CAPTURE]            = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
+    nUpsample[AGGREGATOR_CAPTURE]               = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
+    nDownsample[AGGREGATOR_CAPTURE]             = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
     flags[AGGREGATOR_CAPTURE]                   = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
     nEndpointBufferSize[AGGREGATOR_CAPTURE]     = (UINT32*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(UINT32));
     nEndpointPackets[AGGREGATOR_CAPTURE]        = (UINT32*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(UINT32));
@@ -252,6 +256,10 @@ HRESULT Aggregator::InitializeCapture()
         hr = pAudioClient[AGGREGATOR_CAPTURE][i]->GetMixFormat(&pwfx[AGGREGATOR_CAPTURE][i]);
             EXIT_ON_ERROR(hr)
     }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////
+    //-------- TODO: negotiate wireless node metadata and format (can be hardcoded for now) --------//
+    //////////////////////////////////////////////////////////////////////////////////////////////////
 
     //-------- Calculate the period of each AudioClient buffer based on user's desired DSP buffer length
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
@@ -309,7 +317,15 @@ HRESULT Aggregator::InitializeCapture()
     
     //-------- Instantiate AudioBuffer for each user-chosen capture device
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
-        pAudioBuffer[AGGREGATOR_CAPTURE][i] = new AudioBuffer("Capture Device " + std::to_string(i) + " ", pAudioBufferGroupId[0]);
+        pAudioBuffer[AGGREGATOR_CAPTURE][i] = new AudioBuffer("Hardware Capture Device " + std::to_string(i) + " ", pAudioBufferGroupId[0]);
+
+    //-------- Instantiate AudioBuffer for each user-chosen WASAN capture node
+    for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_CAPTURE]; i++)
+        pAudioBuffer[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = new AudioBuffer("WASAN Capture Node " + std::to_string(i) + " ", pAudioBufferGroupId[0]);
+
+    /////////////////////////////////////////////////////////////////////////////////////////////
+    //-------- TODO: set format and initialize audio buffer object of wireless devices --------//
+    /////////////////////////////////////////////////////////////////////////////////////////////
 
     //-------- Notify the audio sink which format to use
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
@@ -420,7 +436,7 @@ HRESULT Aggregator::InitializeRender()
     pAudioClient[AGGREGATOR_RENDER]         = (IAudioClient**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(IAudioClient*));
     pwfx[AGGREGATOR_RENDER]                 = (WAVEFORMATEX**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(WAVEFORMATEX*));
     pRenderClient                           = (IAudioRenderClient**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(IAudioRenderClient*));
-    pAudioBuffer[AGGREGATOR_RENDER]         = (AudioBuffer**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(AudioBuffer*));
+    pAudioBuffer[AGGREGATOR_RENDER]         = (AudioBuffer**)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER])* sizeof(AudioBuffer*));
     pData[AGGREGATOR_RENDER]                = (BYTE**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(BYTE*));
     nGCD[AGGREGATOR_RENDER]                 = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
     nGCDDiv[AGGREGATOR_RENDER]              = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
@@ -520,7 +536,14 @@ HRESULT Aggregator::InitializeRender()
 
     //-------- Instantiate AudioBuffer for each user-chosen render device
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
-        pAudioBuffer[AGGREGATOR_RENDER][i] = new AudioBuffer("Render Device " + std::to_string(i) + " ", pAudioBufferGroupId[1]);
+        pAudioBuffer[AGGREGATOR_RENDER][i] = new AudioBuffer("Hardware Render Device " + std::to_string(i) + " ", pAudioBufferGroupId[1]);
+
+    //-------- Instantiate AudioBuffer for each user-chosen WASAN render node
+    for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_RENDER]; i++)
+        pAudioBuffer[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = new AudioBuffer("WASAN Render Node " + std::to_string(i) + " ", pAudioBufferGroupId[1]);
+
+
+
 
     //-------- Notify the audio source which format to use
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
@@ -624,7 +647,7 @@ Exit:
 /// <returns></returns>
 HRESULT Aggregator::StartCapture()
 {
-    HRESULT hr = S_OK;
+    HRESULT hr = ERROR_SUCCESS;
 
     //-------- Reset and start capturing on all selected devices
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
@@ -678,7 +701,7 @@ Exit:
 /// <returns></returns>
 HRESULT Aggregator::StopCapture()
 {
-    HRESULT hr = S_OK;
+    HRESULT hr = ERROR_SUCCESS;
     bDone[AGGREGATOR_CAPTURE] = TRUE;
 
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
@@ -699,7 +722,7 @@ Exit:
 /// <returns></returns>
 HRESULT Aggregator::StartRender()
 {
-    HRESULT hr = S_OK;
+    HRESULT hr = ERROR_SUCCESS;
 
     //-------- Reset and start rendering on all selected devices
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
@@ -755,7 +778,7 @@ Exit:
 /// <returns></returns>
 HRESULT Aggregator::StopRender()
 {
-    HRESULT hr = S_OK;
+    HRESULT hr = ERROR_SUCCESS;
     bDone[AGGREGATOR_RENDER] = TRUE;
 
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
@@ -783,7 +806,7 @@ Exit:
 /// </returns>
 HRESULT Aggregator::ListAvailableDevices(UINT8 nDeviceType)
 {  
-    HRESULT hr = S_OK;
+    HRESULT hr = ERROR_SUCCESS;
     LPWSTR pwszID = NULL;
     IPropertyStore* pProps = NULL;
     PROPVARIANT varName;
@@ -866,17 +889,123 @@ Exit:
 
 /// <summary>
 /// <para>Prompts user to choose from devices available to the system.</para>
-/// <para>Must be called after Aggregator::ListCaptureDevices.</para>
+/// <para>Must be called after Aggregator::ListAvailableDevices.</para>
 /// </summary>
+/// <param name="nDeviceType">- indicator of capture vs. render device role.</param>
 /// <returns></returns>
 HRESULT Aggregator::GetUserChoiceDevices(UINT8 nDeviceType)
 {   
-    HRESULT hr = S_OK;
-    UINT32 nUserChoice;
+    HRESULT hr;
+
+    hr = GetWASANNodes(nDeviceType);
+    hr = GetWASAPIDevices(nDeviceType);
+
+    return hr;
+}
+
+/// <summary>
+/// <para>Wrapper for getting user's choice of WASAN node connections.</para>
+/// </summary>
+/// <param name="nDeviceType">- indicator of capture vs. render device role.</param>
+/// <returns></returns>
+HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
+{
+    HRESULT hr = ERROR_SUCCESS;
+    BOOL bUserDone = FALSE;
+    CHAR sInput[AGGREGATOR_CIN_IP_LEN]; // Char array for UINT32 (10 digit number or 15 character IP address) + \n
+    INT32 nStringCompare = 0;
+
+    //-------- Allocate memory for the first user-chosen endpoint device
+    pWASANNodeIP[nDeviceType] = (CHAR*)malloc(AGGREGATOR_CIN_IP_LEN * sizeof(CHAR));
+    if (pWASANNodeIP[nDeviceType] == NULL)
+    {
+        hr = ENOMEM;
+        return hr;
+    }
+
+    //-------- Prompt user to connect WASAN nodes
+    std::cout << MSG "Enter the IP addresses of "
+        << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
+        << " WASAN nodes. I.e: 192.168.137.1" << std::endl;
+
+    while (!bUserDone)
+    {
+        std::cout << MSG "Choose next "
+            << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
+            << " WASAN node (currently selected "
+            << nWASANNodes[nDeviceType] << " nodes) or press [ENTER] to proceed."
+            << std::endl;
+
+        std::cin.get(sInput, AGGREGATOR_CIN_IP_LEN);
+        std::string str(sInput);
+
+        // Skip cin to next line to accept another input on next loop iteration
+        std::cin.clear();
+        std::cin.ignore(AGGREGATOR_CIN_IP_LEN, '\n');
+
+        // If user pressed ENTER, hence does not desire to connect WASAN nodes
+        if (str.length() == 0) break;
+        // If user provided input
+        else
+        {
+            nStringCompare = 0;
+
+            // Check if user already chose this node
+            for (UINT32 i = 0; i < nWASANNodes[nDeviceType]; i++)
+            {
+                nStringCompare = strcmp(pWASANNodeIP[nDeviceType] + AGGREGATOR_CIN_IP_LEN * i, sInput);
+                if (nStringCompare == 0) break;
+            }
+
+            // Check if this node is already chosen
+            if (nStringCompare == 0)
+            {
+                std::cout << WARN "You cannot choose the same node more than once." << std::endl;
+                continue;
+            }
+            // If all is good, add the device into the list of nodes to use for aggregator
+            else
+            {
+                CHAR* dummy = (CHAR*)realloc(pWASANNodeIP[nDeviceType], ++nWASANNodes[nDeviceType] * AGGREGATOR_CIN_IP_LEN * sizeof(CHAR));
+                if (dummy == NULL)
+                {
+                    free(pWASANNodeIP[nDeviceType]);
+                    hr = ENOMEM;
+                    goto Exit;
+                }
+                else
+                {
+                    pWASANNodeIP[nDeviceType] = dummy;
+                    memcpy(pWASANNodeIP[nDeviceType] + (nWASANNodes[nDeviceType] - 1) * AGGREGATOR_CIN_IP_LEN, sInput, AGGREGATOR_CIN_IP_LEN);
+                }
+            }
+        }
+    }
+
+    std::cout << MSG << nWASANNodes[nDeviceType]
+        << ((nDeviceType == AGGREGATOR_CAPTURE) ? " capture" : " render")
+        << " WASAN nodes selected."
+        << std::endl << std::endl;
+
+    return hr;
+
+Exit:
+    return hr;
+}
+
+/// <summary>
+/// <para>Wrapper for getting user's choice of WASAPI devices.</para>
+/// </summary>
+/// <param name="nDeviceType">- indicator of capture vs. render device role.</param>
+/// <returns></returns>
+HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
+{
+    HRESULT hr = ERROR_SUCCESS;
     BOOL bInSet, bUserDone = bInSet = FALSE;
-    CHAR sInput[11]; // Char array for UINT32 (10 digit number) + \n
-    
-    //-------- Allocate memory for the first user-chosen capture device
+    CHAR sInput[AGGREGATOR_CIN_DEVICEID_LEN]; // Char array for UINT32 (10 digit number or 15 character IP address) + \n
+    UINT32 nUserChoice;
+
+    //-------- Allocate memory for the first user-chosen endpoint device
     pDevice[nDeviceType] = (IMMDevice**)malloc(sizeof(IMMDevice*));
     if (pDevice[nDeviceType] == NULL)
     {
@@ -884,32 +1013,38 @@ HRESULT Aggregator::GetUserChoiceDevices(UINT8 nDeviceType)
         return hr;
     }
 
-    std::cout << MSG "Select all desired out of available " << nAllDevices[nDeviceType] << " input devices." << std::endl;
-    
+    std::cout << MSG "Select all desired out of available "
+        << nAllDevices[nDeviceType]
+        << " hardware "
+        << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
+        << " devices."
+        << std::endl;
+
     //-------- Prompt user to select an input device until they indicate they are done or until no more devices are left
     while (!bUserDone && nDevices[nDeviceType] < nAllDevices[nDeviceType])
     {
-        std::cout   << MSG "Choose next "
-                    << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
-                    << " device (currently selected " 
-                    << nDevices[nDeviceType] << " devices) or press [ENTER] to proceed."
-                    << std::endl;
+        std::cout << MSG "Choose next "
+            << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
+            << " device (currently selected "
+            << nDevices[nDeviceType] << " devices) or press [ENTER] to proceed."
+            << std::endl;
 
-        std::cin.get(sInput, 11);
+        std::cin.get(sInput, AGGREGATOR_CIN_DEVICEID_LEN);
         std::string str(sInput);
 
         // Skip cin to next line to accept another input on next loop iteration
         std::cin.clear();
-        std::cin.ignore(11, '\n');
+        std::cin.ignore(AGGREGATOR_CIN_DEVICEID_LEN, '\n');
 
         // If user chose at least 1 device and pressed ENTER
         if (str.length() == 0 && nDevices[nDeviceType] > 0) break;
-        // If user attempts to proceed without choosing single device
-        else if (str.length() == 0 && nDevices[nDeviceType] == 0)
+        // If user attempts to proceed without choosing a single device or WASAN node
+        else if (str.length() == 0 && nDevices[nDeviceType] == 0 && nWASANNodes[nDeviceType] == 0)
         {
-            std::cout   << WARN "You must choose at least 1 "
-                        << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
-                        << " device." << std::endl;
+            std::cout << WARN "You must choose at least 1 "
+                << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
+                << " device."
+                << std::endl;
             continue;
         }
         // If user entered a number
@@ -917,11 +1052,13 @@ HRESULT Aggregator::GetUserChoiceDevices(UINT8 nDeviceType)
         {
             nUserChoice = std::atoi(sInput);
             bInSet = FALSE;
-            
+
             // Check if user input a number within the range of available device indices
             if (nUserChoice < 0 || nUserChoice > nAllDevices[nDeviceType] - 1)
             {
-                std::cout << WARN "You must pick one of existing devices, a number between 0 and " << nAllDevices[nDeviceType] - 1 << std::endl;
+                std::cout << WARN "You must pick one of existing devices, a number between 0 and "
+                    << nAllDevices[nDeviceType] - 1
+                    << std::endl;
                 continue;
             }
 
@@ -931,7 +1068,7 @@ HRESULT Aggregator::GetUserChoiceDevices(UINT8 nDeviceType)
                 bInSet = (pDevice[nDeviceType][i] == pDeviceAll[nDeviceType][nUserChoice]);
                 if (bInSet) break;
             }
-            
+
             // Check if this device is already chosen
             if (bInSet)
             {
@@ -956,9 +1093,12 @@ HRESULT Aggregator::GetUserChoiceDevices(UINT8 nDeviceType)
             }
         }
     }
-    std::cout   << MSG << nDevices[nDeviceType] 
-                << ((nDeviceType == AGGREGATOR_CAPTURE) ? " capture" : " render")
-                << " devices selected." << std::endl << std::endl;
+    std::cout << MSG << nDevices[nDeviceType]
+        << ((nDeviceType == AGGREGATOR_CAPTURE) ? " capture" : " render")
+        << " devices selected."
+        << std::endl << std::endl;
+
+    return hr;
 
 Exit:
     return hr;

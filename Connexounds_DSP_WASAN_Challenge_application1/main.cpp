@@ -16,7 +16,7 @@
 /// <returns></returns>
 int main(int argc, char* argv[])
 {
-	HRESULT hr = S_OK;
+	HRESULT hr = ERROR_SUCCESS;
 
 	// ASCII art
 	std::cout << R"(                           __   __                     _     
