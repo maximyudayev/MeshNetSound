@@ -1,8 +1,6 @@
 /*
     TODO:
         I.------enforce conventions across entire project.
-		II.-----incorporate threading to parallelize work of audio capture, audio render,
-				and resampling operations; don't forget synchronization mechanisms.
 */
 
 #include "Aggregator.h"
@@ -31,14 +29,32 @@ int main(int argc, char* argv[])
 	std::cout << "<--------Starting Aggregator-------->" << std::endl << std::endl;
 
 	Aggregator pAggregator;
+	CHAR sInput[2]; // buffer to receive quit command
+	BOOL bQuit = FALSE;
 	
 	hr = pAggregator.Initialize();
 	
-	hr = pAggregator.StartCapture();
+	hr = pAggregator.Start();
 
-#ifndef DEBUG
-	//hr = pAggregator.StopCapture();
-#endif
+	// "Interactive" CLI
+	// continues capturing until user clicks [q] : quit
+	while (!bQuit)
+	{
+		std::cin.get(sInput, 2);
+		std::string str(sInput);
+
+		// Skip cin to next line to accept another input on next loop iteration
+		std::cin.clear();
+		std::cin.ignore(2, '\n');
+
+		// If user pressed q, hence terminates the program
+		if (strcmp(str.c_str(), "q") == 0) break;
+		// If user pressed any other button
+		else
+			std::cout << MSG "Press [q] to exit." << std::endl;
+	}
+
+	hr = pAggregator.Stop();
 
 	return hr;
 }

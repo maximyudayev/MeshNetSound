@@ -27,7 +27,10 @@
     <ClCompile Include="Resampler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\UDP\UDP.cpp">
+    <ClCompile Include="UDPAudioBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="UDP.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -44,7 +47,10 @@
     <ClInclude Include="Resampler.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\UDP\UDP.h">
+    <ClInclude Include="UDPAudioBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UDP.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

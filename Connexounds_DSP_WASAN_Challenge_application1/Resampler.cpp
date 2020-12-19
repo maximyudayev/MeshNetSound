@@ -38,24 +38,10 @@
 
 RESAMPLERPARAMS	Resampler::tResamplerParams;
 
-/// <summary>
-/// <para>Resampler constructor.</para>
-/// <para>Does not perform any function.</para>
-/// </summary>
 Resampler::Resampler(){}
 
-/// <summary>
-/// <para>Resampler destructor.</para>
-/// <para>Does not perform any function.</para>
-/// </summary>
 Resampler::~Resampler(){}
 
-/// <summary>
-/// Computes the 0th order modified bessel function of the first kind.
-/// (Needed to compute Kaiser window).
-/// </summary>
-/// <param name="x"></param>
-/// <returns></returns>
 DOUBLE Resampler::Izero(DOUBLE x)
 {
     DOUBLE sum, u, halfx, temp;
@@ -75,15 +61,6 @@ DOUBLE Resampler::Izero(DOUBLE x)
     return(sum);
 }
 
-/// <summary>
-/// <para>Initializes memory for FIR filter coefficientsand saves filter desired parameters.</para>
-/// <para>Computes the coeffs of a Kaiser-windowed low pass filter with
-/// the following characteristics.</para>
-/// </summary>
-/// <param name="bHighQuality">- boolean indicating if standard or higher number of zero crossings to use.</param>
-/// <param name="fRollOff">- LP filter roll-off frequency.</param>
-/// <param name="fBeta">- Kaiser window parameter.</param>
-/// <param name="nNl">- number of filter coefficients between each zero-crossing.</param>
 void Resampler::InitLPFilter(BOOL bHighQuality, DOUBLE fRollOff, DOUBLE fBeta, UINT32 nTwosExp)
 {
     tResamplerParams.bHighQuality = bHighQuality;
@@ -130,24 +107,12 @@ void Resampler::InitLPFilter(BOOL bHighQuality, DOUBLE fRollOff, DOUBLE fBeta, U
     tResamplerParams.pImpD[tResamplerParams.nNh - 1] = tResamplerParams.pImp[tResamplerParams.nNh - 1];
 }
 
-/// <summary>
-/// <para>Static method releasing memory allocated for FIR filter
-/// coefficients.</para>
-/// <para>Note: must be called only once from Aggregator or double freeing will occur.</para>
-/// </summary>
 void Resampler::FreeLPFilter()
 {
     free(tResamplerParams.pImp);
     free(tResamplerParams.pImpD);
 }
 
-/// <summary>
-/// <para>Adjusts scaling factor for its parent's AudioBuffer's Resampler
-/// to account for unity gain using the resampling factor.</para>
-/// <para>Note: must be called from one of AudioBuffer's initialization
-/// functions before any resampling is performed.</para>
-/// </summary>
-/// <param name="fFactor">- resampling factor</param>
 void Resampler::SetLPScaling(FLOAT fFactor)
 {
     // Account for increased filter gain when using factors less than 1
@@ -157,20 +122,6 @@ void Resampler::SetLPScaling(FLOAT fFactor)
         fLPScale = 1.0;
 }
 
-/// <summary>
-/// <para>Performs SRC on the WASAPI audio packet and stores output
-/// into the AudioBuffer's corresponding ring buffer.</para>
-/// <para>Note: the SRC implementation might create slight artifacts
-/// because each packet is treated independently and instead of actual Nz*Fs/F's or Nz
-/// extra input samples before and after current packet, padds with 0's.</para>
-/// <para>Note: for each sample, starts from largest coefficients in both wings
-/// and traverses toward the smallest - potentially reduces precision of float results.</para>
-/// </summary>
-/// <param name="tResampleFmt">- alias of the corresponding endpoint's resampling details.</param>
-/// <param name="tEndpointFmt">- alias of the corresponding endpoint's WASAPI details.</param>
-/// <param name="nChannelOffset">- first channel index into the ring buffer of the Resampler's parent AudioBuffer.</param>
-/// <param name="pData">- pointer to the WASAPI-returned audio data buffer to read from.</param>
-/// <returns>Returns the number of resampled values written to the buffer.</returns>
 UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt, UINT32 nChannelOffset, BYTE* pData)
 {
     DOUBLE dh = tResamplerParams.nNl;               // Step size through the filter table

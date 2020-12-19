@@ -138,18 +138,20 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\UDP\UDP.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="AudioBuffer.cpp" />
     <ClCompile Include="Aggregator.cpp" />
     <ClCompile Include="Resampler.cpp" />
+    <ClCompile Include="UDP.cpp" />
+    <ClCompile Include="UDPAudioBuffer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\UDP\UDP.h" />
     <ClInclude Include="Aggregator.h" />
     <ClInclude Include="AudioBuffer.h" />
     <ClInclude Include="config.h" />
     <ClInclude Include="Resampler.h" />
+    <ClInclude Include="UDP.h" />
+    <ClInclude Include="UDPAudioBuffer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -43,23 +43,46 @@
 #endif
 
 //-------- Resampler Macros
-#define RESAMPLER_IZERO_EPSILON 1E-21   // Max error acceptable in Izero 
-#define RESAMPLER_ROLLOFF_FREQ 0.9      //  
-#define RESAMPLER_BETA 4.538            //
-#define RESAMPLER_L_TWOS_EXP 12			// (2^(1+Nc/2)) according to author's conference papaer: 
-                                        // Nc - bits to represent filter coefficients to insure
-                                        // interpolation error to be twice smaller than the 
-                                        // table-entry quantization error. We use floating point hence it is not
-                                        // straight-forwardly applicable as precision changes as number is increased.
-#define RESAMPLER_N_QUALITY_L 13		// Audio quality parameter
-#define RESAMPLER_N_QUALITY_H 35		// Some freaky alien quality
+#define RESAMPLER_IZERO_EPSILON 1E-21               // Max error acceptable in Izero 
+#define RESAMPLER_ROLLOFF_FREQ 0.9                  //  
+#define RESAMPLER_BETA 4.538                        //
+#define RESAMPLER_L_TWOS_EXP 12			            // (2^(1+Nc/2)) according to author's conference papaer: 
+                                                    // Nc - bits to represent filter coefficients to insure
+                                                    // interpolation error to be twice smaller than the 
+                                                    // table-entry quantization error. We use floating point hence it is not
+                                                    // straight-forwardly applicable as precision changes as number is increased.
+#define RESAMPLER_N_QUALITY_L 13		            // Audio quality parameter
+#define RESAMPLER_N_QUALITY_H 35		            // Some freaky alien quality
 
 //-------- Debug Macros
-#define DEBUG                                   // flag aiding in automatic exit after 10s
+#define DEBUG                                       // flag aiding in automatic exit after 10s
 
 #define MSG "[MSG]: "
-#define WARN "[WARN]: "
+#define WARN "[WRN]: "
 #define ERR "[ERR]: "
+#define TAB "       "
+
+//-------- Temporary Macros for WiFi-related stuff that must be replaced with proper code/negotiation
+#define TEMP_AGGREGATOR_SAMPLE_PER_SEC 44100
+#define TEMP_AGGREGATOR_CHANNELS 2
+#define TEMP_AGGREGATOR_BLOCK_ALIGN 8
+#define TEMP_AGGREGATOR_BIT_PER_SAMPLE 32
+#define TEMP_AGGREGATOR_CB_SIZE 22
+#define TEMP_AGGREGATOR_FORMAT_TAG WAVE_FORMAT_EXTENSIBLE
+#define TEMP_AGGREGATOR_AVG_BYTE_PER_SEC 352800
+#define TEMP_AGGREGATOR_SUBFORMAT KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+#define TEMP_AGGREGATOR_CHANNEL_MASK (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT)
+#define TEMP_AGGREGATOR_VALID_BIT_PER_SAMPLE 32
+#define TEMP_AGGREGATOR_ENDPOINT_BUF_SIZE 448
+#define TEMP_UDP_BUFFER_SIZE 4096
+
+//-------- UDP Macros
+#define UDP_RCV_PORT 42069
+
+//-------- Error Macros
+#define ERR_OK 0
+#define ERR_UDP_SOCKET_CREATE 1
+
 
 //-------- Type Definitions
 typedef double DOUBLE;

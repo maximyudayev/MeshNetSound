@@ -36,18 +36,8 @@ static const IID    IID_IAudioClient            = __uuidof(IAudioClient);
 static const IID    IID_IAudioCaptureClient     = __uuidof(IAudioCaptureClient);
 static const IID    IID_IAudioRenderClient      = __uuidof(IAudioRenderClient);
 
-/// <summary>
-/// <para>Aggregator constructor.</para>
-/// <para>High level, clean interface to perform all the cumbersome setup
-/// and negotiation with WASAPI, user parameters, etc.</para>
-/// <para>Note: not thread-safe, must be instantiated only once.</para>
-/// </summary>
 Aggregator::Aggregator(){}
 
-/// <summary>
-/// <para>Aggregator destructor.</para>
-/// <para>Frees all alloc'ed memory and cleans up underlying classes.</para>
-/// </summary>
 Aggregator::~Aggregator()
 {
     for (UINT32 j = 0; j < 2; j++)
@@ -114,17 +104,11 @@ Aggregator::~Aggregator()
     if (pAudioBufferGroupId != NULL)                free(pAudioBufferGroupId);
 
     SAFE_RELEASE(pEnumerator)
+
+    //-------- Release Winsock DLL memory
+    WSACleanup();
 }
 
-/// <summary>
-/// <para>Alloc's memory and instantiates WASAPI interface
-/// to stream capture device data.</para>
-/// <para>Note: if at some point crashes, likely it is because of
-/// double deletion of pAudioBuffer or pResampler. Check if EXIT_ON_ERROR
-/// is triggered before either is instantiated using "new" and if so, provide
-/// extra safety checks.</para>
-/// </summary>
-/// <returns></returns>
 HRESULT Aggregator::Initialize()
 {
     HRESULT hr = ERROR_SUCCESS;
@@ -141,9 +125,16 @@ HRESULT Aggregator::Initialize()
             (void**)&pEnumerator);
         EXIT_ON_ERROR(hr)
     
-    //---------------- Listing and Recording of User Sink/Source Device Choices ----------------//
+    //---------------- Listing and Recording of User Sink/Source Device Choices ----------------//      
+    //-------- Try to get user choice of WASAN capture nodes AGGREGATOR_OP_ATTEMPTS times
+    do
+    {
+        hr = GetWASANNodes(AGGREGATOR_CAPTURE);
+    } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+        EXIT_ON_ERROR(hr)
 
     //-------- Try to list all available capture devices AGGREGATOR_OP_ATTEMPTS times
+    attempt = 0; // don't forget to reset the number of attempts
     do
     {
         hr = ListAvailableDevices(AGGREGATOR_CAPTURE);
@@ -154,10 +145,18 @@ HRESULT Aggregator::Initialize()
     attempt = 0; // don't forget to reset the number of attempts
     do
     {
-        hr = GetUserChoiceDevices(AGGREGATOR_CAPTURE);
+        hr = GetWASAPIDevices(AGGREGATOR_CAPTURE);
     } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
         EXIT_ON_ERROR(hr)
 
+    //-------- Try to get user choice of WASAN render nodes AGGREGATOR_OP_ATTEMPTS times
+    attempt = 0; // don't forget to reset the number of attempts
+    do
+    {
+        hr = GetWASANNodes(AGGREGATOR_RENDER);
+    } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
+        EXIT_ON_ERROR(hr)
+    
     //-------- Try to list all available render devices AGGREGATOR_OP_ATTEMPTS times
     attempt = 0; // don't forget to reset the number of attempts
     do
@@ -170,13 +169,34 @@ HRESULT Aggregator::Initialize()
     attempt = 0; // don't forget to reset the number of attempts
     do
     {
-        hr = GetUserChoiceDevices(AGGREGATOR_RENDER);
+        hr = GetWASAPIDevices(AGGREGATOR_RENDER);
     } while (hr != ERROR_SUCCESS && ++attempt < AGGREGATOR_OP_ATTEMPTS);
         EXIT_ON_ERROR(hr)
 
+    std::cout   << MSG << nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]
+                << " inputs and "
+                << nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]
+                << " outputs selected."
+                << std::endl << std::endl;
+
     //---------------- Initialization ----------------//
 
-    // allocate space for indices of 1 input ring buffer and 1 output ring buffer 
+    //-------- Initialize winsock if user chose to connect to other WASAN nodes
+    if (nWASANNodes[AGGREGATOR_CAPTURE] != 0 || nWASANNodes[AGGREGATOR_RENDER] != 0)
+    {
+        WSADATA wsa;
+        std::cout << MSG << "Initialising Winsock DLL..." << std::endl;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+        {
+            std::cout   << ERR << "Winsock initialization failed. Error Code: " 
+                        << WSAGetLastError() 
+                        << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        std::cout << MSG << "Success. Winsock initialized." << std::endl;
+    }
+
+    //-------- Allocate space for indices of 1 input ring buffer and 1 output ring buffer 
     pAudioBufferGroupId = (UINT32*)malloc(2 * sizeof(UINT32));
 
     //-------- Initialize LP Filter of the Resampler class
@@ -200,10 +220,6 @@ Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Wrapper for all initialization steps on the capturing side.</para>
-/// </summary>
-/// <returns></returns>
 HRESULT Aggregator::InitializeCapture()
 {
     HRESULT hr = ERROR_SUCCESS;
@@ -213,15 +229,15 @@ HRESULT Aggregator::InitializeCapture()
     pwfx[AGGREGATOR_CAPTURE]                    = (WAVEFORMATEX**)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(WAVEFORMATEX*));
     pCaptureClient                              = (IAudioCaptureClient**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(IAudioCaptureClient*));
     pAudioBuffer[AGGREGATOR_CAPTURE]            = (AudioBuffer**)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(AudioBuffer*));
-    pData[AGGREGATOR_CAPTURE]                   = (BYTE**)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(BYTE*));
+    pData[AGGREGATOR_CAPTURE]                   = (BYTE**)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(BYTE*));
     nGCD[AGGREGATOR_CAPTURE]                    = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
     nGCDDiv[AGGREGATOR_CAPTURE]                 = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
     nGCDTFreqDiv[AGGREGATOR_CAPTURE]            = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
     nUpsample[AGGREGATOR_CAPTURE]               = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
     nDownsample[AGGREGATOR_CAPTURE]             = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
-    flags[AGGREGATOR_CAPTURE]                   = (DWORD*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(DWORD));
-    nEndpointBufferSize[AGGREGATOR_CAPTURE]     = (UINT32*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(UINT32));
-    nEndpointPackets[AGGREGATOR_CAPTURE]        = (UINT32*)malloc(nDevices[AGGREGATOR_CAPTURE] * sizeof(UINT32));
+    flags[AGGREGATOR_CAPTURE]                   = (DWORD*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(DWORD));
+    nEndpointBufferSize[AGGREGATOR_CAPTURE]     = (UINT32*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(UINT32));
+    nEndpointPackets[AGGREGATOR_CAPTURE]        = (UINT32*)malloc((nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]) * sizeof(UINT32));
     
     //-------- Check if allocation of any of the crucial variables failed, clean up and return with ENOMEM otherwise
     if (pAudioClient[AGGREGATOR_CAPTURE] == NULL ||
@@ -260,9 +276,28 @@ HRESULT Aggregator::InitializeCapture()
     //////////////////////////////////////////////////////////////////////////////////////////////////
     //-------- TODO: negotiate wireless node metadata and format (can be hardcoded for now) --------//
     //////////////////////////////////////////////////////////////////////////////////////////////////
+    for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_CAPTURE]; i++)
+    {
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = (WAVEFORMATEX*)malloc(sizeof(WAVEFORMATEXTENSIBLE));
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->nSamplesPerSec = TEMP_AGGREGATOR_SAMPLE_PER_SEC;
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->nChannels = TEMP_AGGREGATOR_CHANNELS;
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->nBlockAlign = TEMP_AGGREGATOR_BLOCK_ALIGN;
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->wBitsPerSample = TEMP_AGGREGATOR_BIT_PER_SAMPLE;
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->cbSize = TEMP_AGGREGATOR_CB_SIZE;
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->wFormatTag = TEMP_AGGREGATOR_FORMAT_TAG;
+        pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i]->nAvgBytesPerSec = TEMP_AGGREGATOR_AVG_BYTE_PER_SEC;
+        reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i])->SubFormat = TEMP_AGGREGATOR_SUBFORMAT;
+        reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i])->dwChannelMask = TEMP_AGGREGATOR_CHANNEL_MASK;
+        reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i])->Samples.wValidBitsPerSample = TEMP_AGGREGATOR_VALID_BIT_PER_SAMPLE;
+    
+        nEndpointBufferSize[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = TEMP_AGGREGATOR_ENDPOINT_BUF_SIZE;
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////
+    //----------------------------------------------------------------------------------------------//
+    //////////////////////////////////////////////////////////////////////////////////////////////////
 
     //-------- Calculate the period of each AudioClient buffer based on user's desired DSP buffer length
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
+    for (UINT32 i = 0; i < (nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]); i++)
     {
         nGCD[AGGREGATOR_CAPTURE][i] = gcd(pwfx[AGGREGATOR_CAPTURE][i]->nSamplesPerSec, AGGREGATOR_SAMPLE_FREQ);
 
@@ -286,7 +321,7 @@ HRESULT Aggregator::InitializeCapture()
         }
     }
 
-    //-------- Initialize streams to operate in callback mode
+    //-------- Initialize streams to operate in poll mode
     // Allow WASAPI to choose endpoint buffer size, glitches otherwise
     // for both, event-driven and polling methods, outputs 448 frames for mic
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
@@ -308,8 +343,10 @@ HRESULT Aggregator::InitializeCapture()
         hr = pAudioClient[AGGREGATOR_CAPTURE][i]->GetService(IID_IAudioCaptureClient,
                                         (void**)&pCaptureClient[i]);
             EXIT_ON_ERROR(hr)
-        printf("[%d]:\nThe %d-th buffer size is: %d\n", i, i, nEndpointBufferSize[AGGREGATOR_CAPTURE][i]);
     }
+
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
+        printf("[%d]:\nThe %d-th buffer size is: %d\n", i, i, nEndpointBufferSize[AGGREGATOR_CAPTURE][i]);
     
     //-------- Create a new AudioBuffer object group - corresponds to 1 input ring buffer
     hr = AudioBuffer::CreateBufferGroup(&pAudioBufferGroupId[0]);
@@ -321,21 +358,17 @@ HRESULT Aggregator::InitializeCapture()
 
     //-------- Instantiate AudioBuffer for each user-chosen WASAN capture node
     for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_CAPTURE]; i++)
-        pAudioBuffer[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = new AudioBuffer("WASAN Capture Node " + std::to_string(i) + " ", pAudioBufferGroupId[0]);
-
-    /////////////////////////////////////////////////////////////////////////////////////////////
-    //-------- TODO: set format and initialize audio buffer object of wireless devices --------//
-    /////////////////////////////////////////////////////////////////////////////////////////////
+        pAudioBuffer[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = new UDPAudioBuffer("WASAN Capture Node " + std::to_string(i) + " ", pAudioBufferGroupId[0], pWASANNodeIP[AGGREGATOR_CAPTURE] + i * AGGREGATOR_CIN_IP_LEN);
 
     //-------- Notify the audio sink which format to use
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
     {
         hr = pAudioBuffer[AGGREGATOR_CAPTURE][i]->SetFormat(pwfx[AGGREGATOR_CAPTURE][i]);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Set data structure size for channelwise audio storage
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++) 
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
         nAggregatedChannels[AGGREGATOR_CAPTURE] += pwfx[AGGREGATOR_CAPTURE][i]->nChannels;
     
     pCircularBuffer[AGGREGATOR_CAPTURE] = (FLOAT**)malloc(nAggregatedChannels[AGGREGATOR_CAPTURE] * sizeof(FLOAT*));
@@ -362,7 +395,7 @@ HRESULT Aggregator::InitializeCapture()
     }
 
     //-------- Initialize AudioBuffer objects' buffers using the obtained information
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
     {
         hr = pAudioBuffer[AGGREGATOR_CAPTURE][i]->InitBuffer(&nEndpointBufferSize[AGGREGATOR_CAPTURE][i],
                                                     pCircularBuffer[AGGREGATOR_CAPTURE],
@@ -373,7 +406,7 @@ HRESULT Aggregator::InitializeCapture()
     }
 
     //-------- Write captured data into a WAV file for debugging
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
     {
         hr = pAudioBuffer[AGGREGATOR_CAPTURE][i]->InitWAV();
             EXIT_ON_ERROR(hr)
@@ -423,29 +456,24 @@ Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Wrapper for all initialization steps on the rendering side.</para>
-/// </summary>
-/// <returns></returns>
 HRESULT Aggregator::InitializeRender()
 {
     HRESULT hr = ERROR_SUCCESS;
 
     //-------- Use information obtained from user inputs to dynamically create the system
-
     pAudioClient[AGGREGATOR_RENDER]         = (IAudioClient**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(IAudioClient*));
-    pwfx[AGGREGATOR_RENDER]                 = (WAVEFORMATEX**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(WAVEFORMATEX*));
+    pwfx[AGGREGATOR_RENDER]                 = (WAVEFORMATEX**)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(WAVEFORMATEX*));
     pRenderClient                           = (IAudioRenderClient**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(IAudioRenderClient*));
-    pAudioBuffer[AGGREGATOR_RENDER]         = (AudioBuffer**)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER])* sizeof(AudioBuffer*));
-    pData[AGGREGATOR_RENDER]                = (BYTE**)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(BYTE*));
-    nGCD[AGGREGATOR_RENDER]                 = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
-    nGCDDiv[AGGREGATOR_RENDER]              = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
-    nGCDTFreqDiv[AGGREGATOR_RENDER]         = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
-    nUpsample[AGGREGATOR_RENDER]            = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
-    nDownsample[AGGREGATOR_RENDER]          = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
-    flags[AGGREGATOR_RENDER]                = (DWORD*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(DWORD));
-    nEndpointBufferSize[AGGREGATOR_RENDER]  = (UINT32*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(UINT32));
-    nEndpointPackets[AGGREGATOR_RENDER]     = (UINT32*)malloc(nDevices[AGGREGATOR_RENDER] * sizeof(UINT32));
+    pAudioBuffer[AGGREGATOR_RENDER]         = (AudioBuffer**)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(AudioBuffer*));
+    pData[AGGREGATOR_RENDER]                = (BYTE**)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(BYTE*));
+    nGCD[AGGREGATOR_RENDER]                 = (DWORD*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(DWORD));
+    nGCDDiv[AGGREGATOR_RENDER]              = (DWORD*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(DWORD));
+    nGCDTFreqDiv[AGGREGATOR_RENDER]         = (DWORD*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(DWORD));
+    nUpsample[AGGREGATOR_RENDER]            = (DWORD*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(DWORD));
+    nDownsample[AGGREGATOR_RENDER]          = (DWORD*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(DWORD));
+    flags[AGGREGATOR_RENDER]                = (DWORD*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(DWORD));
+    nEndpointBufferSize[AGGREGATOR_RENDER]  = (UINT32*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(UINT32));
+    nEndpointPackets[AGGREGATOR_RENDER]     = (UINT32*)malloc((nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]) * sizeof(UINT32));
 
     //-------- Check if allocation of any of the crucial variables failed, clean up and return with ENOMEM otherwise
     if (pAudioClient[AGGREGATOR_RENDER] == NULL ||
@@ -480,6 +508,29 @@ HRESULT Aggregator::InitializeRender()
             EXIT_ON_ERROR(hr)
     }
 
+    //////////////////////////////////////////////////////////////////////////////////////////////////
+    //-------- TODO: negotiate wireless node metadata and format (can be hardcoded for now) --------//
+    //////////////////////////////////////////////////////////////////////////////////////////////////
+    for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_CAPTURE]; i++)
+    {
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = (WAVEFORMATEX*)malloc(sizeof(WAVEFORMATEXTENSIBLE));
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->nSamplesPerSec = TEMP_AGGREGATOR_SAMPLE_PER_SEC;
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->nChannels = TEMP_AGGREGATOR_CHANNELS;
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->nBlockAlign = TEMP_AGGREGATOR_BLOCK_ALIGN;
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->wBitsPerSample = TEMP_AGGREGATOR_BIT_PER_SAMPLE;
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->cbSize = TEMP_AGGREGATOR_CB_SIZE;
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->wFormatTag = TEMP_AGGREGATOR_FORMAT_TAG;
+        pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i]->nAvgBytesPerSec = TEMP_AGGREGATOR_AVG_BYTE_PER_SEC;
+        reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i])->SubFormat = TEMP_AGGREGATOR_SUBFORMAT;
+        reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i])->dwChannelMask = TEMP_AGGREGATOR_CHANNEL_MASK;
+        reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i])->Samples.wValidBitsPerSample = TEMP_AGGREGATOR_VALID_BIT_PER_SAMPLE;
+
+        nEndpointBufferSize[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = TEMP_AGGREGATOR_ENDPOINT_BUF_SIZE;
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////
+    //----------------------------------------------------------------------------------------------//
+    //////////////////////////////////////////////////////////////////////////////////////////////////
+
     //-------- Initialize streams to operate in callback mode
     // Allow WASAPI to choose endpoint buffer size, glitches otherwise
     // for both, event-driven and polling methods, outputs 448 frames for mic
@@ -492,7 +543,7 @@ HRESULT Aggregator::InitializeRender()
     }
 
     //-------- Calculate the period of each AudioClient buffer based on user's desired DSP buffer length
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
     {
         nGCD[AGGREGATOR_RENDER][i] = gcd(pwfx[AGGREGATOR_RENDER][i]->nSamplesPerSec, AGGREGATOR_SAMPLE_FREQ);
 
@@ -527,8 +578,10 @@ HRESULT Aggregator::InitializeRender()
         hr = pAudioClient[AGGREGATOR_RENDER][i]->GetService(IID_IAudioRenderClient,
                                             (void**)&pRenderClient[i]);
             EXIT_ON_ERROR(hr)
-        printf("[%d]:\nThe %d-th buffer size is: %d\n", i, i, nEndpointBufferSize[AGGREGATOR_RENDER][i]);
     }
+    
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
+        printf("[%d]:\nThe %d-th buffer size is: %d\n", i, i, nEndpointBufferSize[AGGREGATOR_RENDER][i]);
 
     //-------- Create a new AudioBuffer object group - corresponds to 1 output ring buffer
     hr = AudioBuffer::CreateBufferGroup(&pAudioBufferGroupId[1]);
@@ -540,20 +593,17 @@ HRESULT Aggregator::InitializeRender()
 
     //-------- Instantiate AudioBuffer for each user-chosen WASAN render node
     for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_RENDER]; i++)
-        pAudioBuffer[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = new AudioBuffer("WASAN Render Node " + std::to_string(i) + " ", pAudioBufferGroupId[1]);
-
-
-
+        pAudioBuffer[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = new UDPAudioBuffer("WASAN Render Node " + std::to_string(i) + " ", pAudioBufferGroupId[1], pWASANNodeIP[AGGREGATOR_RENDER] + i * AGGREGATOR_CIN_IP_LEN);
 
     //-------- Notify the audio source which format to use
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
     {
         hr = pAudioBuffer[AGGREGATOR_RENDER][i]->SetFormat(pwfx[AGGREGATOR_RENDER][i]);
             EXIT_ON_ERROR(hr)
     }
 
     //-------- Set data structure size for channelwise audio storage
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
         nAggregatedChannels[AGGREGATOR_RENDER] += pwfx[AGGREGATOR_RENDER][i]->nChannels;
 
     pCircularBuffer[AGGREGATOR_RENDER] = (FLOAT**)malloc(nAggregatedChannels[AGGREGATOR_RENDER] * sizeof(FLOAT*));
@@ -580,7 +630,7 @@ HRESULT Aggregator::InitializeRender()
     }
 
     //-------- Initialize AudioBuffer objects' buffers using the obtained information
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
     {
         hr = pAudioBuffer[AGGREGATOR_RENDER][i]->InitBuffer(&nEndpointBufferSize[AGGREGATOR_RENDER][i],
                                                             pCircularBuffer[AGGREGATOR_RENDER],
@@ -591,7 +641,7 @@ HRESULT Aggregator::InitializeRender()
     }
 
     //-------- Write captured data into a WAV file for debugging
-    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
+    for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
     {
         hr = pAudioBuffer[AGGREGATOR_RENDER][i]->InitWAV();
             EXIT_ON_ERROR(hr)
@@ -641,13 +691,46 @@ Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Starts capturing audio from user-selected devices on a poll basis.</para>
-/// </summary>
-/// <returns></returns>
+HRESULT Aggregator::Start()
+{
+    HRESULT hr = ERROR_SUCCESS;
+
+    bDone[AGGREGATOR_CAPTURE] = FALSE;
+    bDone[AGGREGATOR_RENDER] = FALSE;
+
+    hr = StartCapture();
+        EXIT_ON_ERROR(hr)
+
+    hr = StartRender();
+        EXIT_ON_ERROR(hr)
+
+    return hr;
+Exit:
+    return hr;
+}
+
+HRESULT Aggregator::Stop()
+{
+    HRESULT hr = ERROR_SUCCESS;
+
+    bDone[AGGREGATOR_CAPTURE] = TRUE;
+    bDone[AGGREGATOR_RENDER] = TRUE;
+
+    hr = StopCapture();
+        EXIT_ON_ERROR(hr)
+
+    hr = StopRender();
+        EXIT_ON_ERROR(hr)
+
+    return hr;
+Exit:
+    return hr;
+}
+
 HRESULT Aggregator::StartCapture()
 {
     HRESULT hr = ERROR_SUCCESS;
+    UINT32 nThreadId = 0;
 
     //-------- Reset and start capturing on all selected devices
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
@@ -658,51 +741,86 @@ HRESULT Aggregator::StartCapture()
         hr = pAudioClient[AGGREGATOR_CAPTURE][i]->Start();
             EXIT_ON_ERROR(hr)
     }
-    
+
     std::cout << MSG "Starting audio capture." << std::endl;
 
-    //-------- Capture endpoint buffer data in a poll-based fashion
-    while (!bDone[AGGREGATOR_CAPTURE])
+    if (nWASANNodes[AGGREGATOR_CAPTURE] > 0 && nDevices[AGGREGATOR_CAPTURE] > 0)
     {
-        // Captures data from all devices
-        for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
-        {
-            hr = pCaptureClient[i]->GetNextPacketSize(&nEndpointPackets[AGGREGATOR_CAPTURE][i]);
-                EXIT_ON_ERROR(hr)
-
-            if (nEndpointPackets[AGGREGATOR_CAPTURE][i] > 0)
-            {
-                hr = pCaptureClient[i]->GetBuffer(&pData[AGGREGATOR_CAPTURE][i],
-                                                &nEndpointBufferSize[AGGREGATOR_CAPTURE][i],
-                                                &flags[AGGREGATOR_CAPTURE][i], NULL, NULL);
-                    EXIT_ON_ERROR(hr)
-
-                if (flags[AGGREGATOR_CAPTURE][i] & AUDCLNT_BUFFERFLAGS_SILENT)
-                    pData[AGGREGATOR_CAPTURE][i] = NULL;  // Tell PullData to write silence.
-
-                hr = pAudioBuffer[AGGREGATOR_CAPTURE][i]->PullData(pData[AGGREGATOR_CAPTURE][i], &bDone[AGGREGATOR_CAPTURE]);
-                    EXIT_ON_ERROR(hr)
-
-                hr = pCaptureClient[i]->ReleaseBuffer(nEndpointBufferSize[AGGREGATOR_CAPTURE][i]);
-                    EXIT_ON_ERROR(hr)
-            }
-        }
+        hCaptureThread = (HANDLE*)malloc(2 * sizeof(HANDLE));
+        dwCaptureThreadId = (DWORD*)malloc(2 * sizeof(DWORD));
+        nCaptureThread = 2;
     }
-    
+    else if (nWASANNodes[AGGREGATOR_CAPTURE] > 0 || nDevices[AGGREGATOR_CAPTURE] > 0)
+    {
+        hCaptureThread = (HANDLE*)malloc(sizeof(HANDLE));
+        dwCaptureThreadId = (DWORD*)malloc(sizeof(DWORD));
+        nCaptureThread = 1;
+    } // else it remains 0
+
+    //-------- Start capturing on all chosen WASAN node sockets
+    if (nWASANNodes[AGGREGATOR_CAPTURE] > 0)
+    {
+        // Create a struct for the UDP capture thread to access all necessary data elements
+        UDPCAPTURETHREADPARAM pCaptureThreadParam = {
+            UDPServerIP,
+            (UDPAudioBuffer**)(pAudioBuffer[AGGREGATOR_CAPTURE] + nDevices[AGGREGATOR_CAPTURE]),
+            nWASANNodes[AGGREGATOR_CAPTURE],
+            &bDone[AGGREGATOR_CAPTURE]
+        };
+
+        // Create a server listener thread
+        hCaptureThread[nThreadId] = CreateThread(NULL, 0, UDPCaptureThread, (LPVOID)&pCaptureThreadParam, 0, &dwCaptureThreadId[nThreadId]);
+
+        if (hCaptureThread[nThreadId] == NULL)
+        {
+            std::cout << ERR "Failed to create UDP Server thread." << std::endl;
+
+            hr = ERROR_SERVICE_NO_THREAD;
+                EXIT_ON_ERROR(hr)
+        }
+
+        std::cout << MSG "Succesfully created UDP Server thread." << std::endl;
+        nThreadId++; // increment the helper variable
+    }
+
+    //-------- Start capturing on all chosen WASAPI devices
+    if (nDevices[AGGREGATOR_CAPTURE] > 0)
+    {
+        // Create a struct for the UDP capture thread to access all necessary data elements
+        WASAPICAPTURETHREADPARAM pCaptureThreadParam = {
+            pAudioBuffer[AGGREGATOR_CAPTURE],
+            nDevices[AGGREGATOR_CAPTURE],
+            &bDone[AGGREGATOR_CAPTURE],
+            &flags[AGGREGATOR_CAPTURE],
+            pData[AGGREGATOR_CAPTURE],
+            &nEndpointBufferSize[AGGREGATOR_CAPTURE],
+            &nEndpointPackets[AGGREGATOR_CAPTURE],
+            pCaptureClient
+        };
+
+        // Create a server listener thread
+        hCaptureThread[nThreadId] = CreateThread(NULL, 0, WASAPICaptureThread, (LPVOID)&pCaptureThreadParam, 0, &dwCaptureThreadId[nThreadId]);
+
+        if (hCaptureThread[nThreadId] == NULL)
+        {
+            std::cout << ERR "Failed to create WASAPI capture thread." << std::endl;
+
+            hr = ERROR_SERVICE_NO_THREAD;
+                EXIT_ON_ERROR(hr)
+        }
+
+        std::cout << MSG "Succesfully created WASAPI capture thread." << std::endl;
+    }
+
+    return hr;
+
 Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Flags to each AudioBuffer to not request new frames from WASAPI
-/// and stops each WASAPI stream.</para>
-/// <para>Note: not thread-safe. Must add mutex on bDone.</para>
-/// </summary>
-/// <returns></returns>
 HRESULT Aggregator::StopCapture()
 {
     HRESULT hr = ERROR_SUCCESS;
-    bDone[AGGREGATOR_CAPTURE] = TRUE;
 
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
     {
@@ -711,18 +829,29 @@ HRESULT Aggregator::StopCapture()
             EXIT_ON_ERROR(hr)
     }
     std::cout << MSG "Stopped audio capture." << std::endl;
-    
+
+    // Wait for capture threads to terminate
+    WaitForMultipleObjects(nCaptureThread, hCaptureThread, TRUE, INFINITE);
+    for (UINT32 i = 0; i < nCaptureThread; i++)
+    {
+        CloseHandle(hCaptureThread[i]);
+        hCaptureThread[i] = NULL;
+        dwCaptureThreadId[i] = NULL;
+    }
+
+    if (hCaptureThread != NULL) free(hCaptureThread);
+    if (dwCaptureThreadId != NULL) free(dwCaptureThreadId);
+
+    return hr;
+
 Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Starts rendering audio on user-selected devices on a poll basis.</para>
-/// </summary>
-/// <returns></returns>
 HRESULT Aggregator::StartRender()
 {
     HRESULT hr = ERROR_SUCCESS;
+    UINT32 nThreadId = 0;
 
     //-------- Reset and start rendering on all selected devices
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
@@ -739,47 +868,48 @@ HRESULT Aggregator::StartRender()
 
     std::cout << MSG "Starting audio render." << std::endl;
 
-    //-------- Capture endpoint buffer data in a poll-based fashion
-    while (!bDone[AGGREGATOR_RENDER])
+    if (nWASANNodes[AGGREGATOR_RENDER] > 0 || nDevices[AGGREGATOR_RENDER] > 0)
     {
-        // Pushes data from ring buffer into corresponding devices
-        for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
-        {
-            UINT32 nFrames = pAudioBuffer[AGGREGATOR_RENDER][i]->FramesAvailable();
-            if (nFrames > 0)
-            {
-                // Get the lesser of the number of frames to write to the device
-                nFrames = min(nFrames, nEndpointBufferSize[AGGREGATOR_RENDER][i]);
+        hRenderThread = (HANDLE*)malloc(sizeof(HANDLE));
+        dwRenderThreadId = (DWORD*)malloc(sizeof(DWORD));
+        nRenderThread = 1;
 
-                // Get the pointer from WASAPI where to write data to
-                hr = pRenderClient[i]->GetBuffer(nFrames, &pData[AGGREGATOR_RENDER][i]);
-                    EXIT_ON_ERROR(hr)
-                
-                // Load data from AudioBuffer's ring buffer into the WASAPI buffer for this device
-                hr = pAudioBuffer[AGGREGATOR_RENDER][i]->PushData(pData[AGGREGATOR_RENDER][i], nFrames);
-                    EXIT_ON_ERROR(hr)
-                
-                // Release buffer before next packet
-                hr = pRenderClient[i]->ReleaseBuffer(nFrames, flags[AGGREGATOR_RENDER][i]);
-                    EXIT_ON_ERROR(hr)
-            }
+        // Create a struct for the UDP capture thread to access all necessary data elements
+        RENDERTHREADPARAM pCaptureThreadParam = {
+            &bDone[AGGREGATOR_RENDER],
+            nDevices[AGGREGATOR_RENDER],
+            pAudioBuffer[AGGREGATOR_RENDER],
+            &nEndpointBufferSize[AGGREGATOR_RENDER],
+            pRenderClient,
+            pData[AGGREGATOR_RENDER],
+            &flags[AGGREGATOR_RENDER],
+            (UDPAudioBuffer**)(pAudioBuffer[AGGREGATOR_RENDER] + nDevices[AGGREGATOR_RENDER]),
+            nWASANNodes[AGGREGATOR_RENDER]
+        };
+
+        // Create a server listener thread
+        hRenderThread[nThreadId] = CreateThread(NULL, 0, RenderThread, (LPVOID)&pCaptureThreadParam, 0, &dwRenderThreadId[nThreadId]);
+
+        if (hRenderThread[nThreadId] == NULL)
+        {
+            std::cout << ERR "Failed to create audio render Aggregator thread." << std::endl;
+
+            hr = ERROR_SERVICE_NO_THREAD;
+                EXIT_ON_ERROR(hr)
         }
-    }
+
+        std::cout << MSG "Succesfully created audio render Aggregator thread." << std::endl;
+    } // else it remains 0
+
+    return hr;
 
 Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Flags to WASAPI to not expect new frames from AudioBuffer
-/// and stops each WASAPI stream.</para>
-/// <para>Note: not thread-safe. Must add mutex on bDone.</para>
-/// </summary>
-/// <returns></returns>
 HRESULT Aggregator::StopRender()
 {
     HRESULT hr = ERROR_SUCCESS;
-    bDone[AGGREGATOR_RENDER] = TRUE;
 
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
     {
@@ -789,21 +919,24 @@ HRESULT Aggregator::StopRender()
     }
     std::cout << MSG "Stopped audio render." << std::endl;
 
+    // Wait for render threads to terminate
+    WaitForMultipleObjects(nRenderThread, hRenderThread, TRUE, INFINITE);
+    for (UINT32 i = 0; i < nRenderThread; i++)
+    {
+        CloseHandle(hRenderThread[i]);
+        hRenderThread[i] = NULL;
+        dwRenderThreadId[i] = NULL;
+    }
+
+    if (hRenderThread != NULL) free(hRenderThread);
+    if (dwRenderThreadId != NULL) free(dwRenderThreadId);
+
+    return hr;
+
 Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Pipes all active chosen type devices into console.</para> 
-/// <para>Records each device into pDevice data structure to 
-/// later retreive the desired ones based on user input.</para>
-/// </summary>
-/// <returns>
-/// <para>S_OK if successful.</para>
-/// <para>ENOMEM if memory (re)allocation for IMMDevice array fails.</para>
-/// <para>IMMDevice/IMMDeviceCollection/IMMDeviceEnumerator/IPropertyStore
-/// specific error otherwise.</para>
-/// </returns>
 HRESULT Aggregator::ListAvailableDevices(UINT8 nDeviceType)
 {  
     HRESULT hr = ERROR_SUCCESS;
@@ -887,27 +1020,6 @@ Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Prompts user to choose from devices available to the system.</para>
-/// <para>Must be called after Aggregator::ListAvailableDevices.</para>
-/// </summary>
-/// <param name="nDeviceType">- indicator of capture vs. render device role.</param>
-/// <returns></returns>
-HRESULT Aggregator::GetUserChoiceDevices(UINT8 nDeviceType)
-{   
-    HRESULT hr;
-
-    hr = GetWASANNodes(nDeviceType);
-    hr = GetWASAPIDevices(nDeviceType);
-
-    return hr;
-}
-
-/// <summary>
-/// <para>Wrapper for getting user's choice of WASAN node connections.</para>
-/// </summary>
-/// <param name="nDeviceType">- indicator of capture vs. render device role.</param>
-/// <returns></returns>
 HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
 {
     HRESULT hr = ERROR_SUCCESS;
@@ -948,7 +1060,7 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
         // If user provided input
         else
         {
-            nStringCompare = 0;
+            nStringCompare = 1;
 
             // Check if user already chose this node
             for (UINT32 i = 0; i < nWASANNodes[nDeviceType]; i++)
@@ -987,17 +1099,47 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
         << " WASAN nodes selected."
         << std::endl << std::endl;
 
+    //-------- Prompt user for current device's IP address if any WASAN capture nodes are to be connected
+    if (nWASANNodes > 0 && nDeviceType == AGGREGATOR_CAPTURE)
+    {
+        std::cout   << MSG "Enter the IP address of this device on which to listen to WASAN capture nodes as a UDP server." << std::endl
+                    << TAB "In current implementation, enter the IP address from the mobile hotspot tab. I.e: 192.168.137.1" << std::endl
+                    << TAB "Update firewall rules to allow UDP traffic on that IP, on port " << UDP_RCV_PORT << " , on public networks."
+                    << std::endl << std::endl;
+
+        bUserDone = FALSE;
+        while (!bUserDone)
+        {
+            std::cout << MSG "Enter this device's (UDP server) IP address." << std::endl;
+
+            std::cin.get(sInput, AGGREGATOR_CIN_IP_LEN);
+            std::string str(sInput);
+
+            // Skip cin to next line to accept another input on next loop iteration
+            std::cin.clear();
+            std::cin.ignore(AGGREGATOR_CIN_IP_LEN, '\n');
+
+            // If user attempts to proceed without enterint own IP address
+            if (str.length() == 0)
+            {
+                std::cout << WARN "You must enter this device's IP address to act as UDP server to receive audio streams from other WASAN capture nodes." << std::endl;
+                continue;
+            }
+            // If user entered a number, copy IP to Aggregator and exit loop
+            else
+            {
+                strcpy(UDPServerIP, str.c_str());
+                break;
+            }
+        }
+    }
+
     return hr;
 
 Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Wrapper for getting user's choice of WASAPI devices.</para>
-/// </summary>
-/// <param name="nDeviceType">- indicator of capture vs. render device role.</param>
-/// <returns></returns>
 HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
 {
     HRESULT hr = ERROR_SUCCESS;
@@ -1104,14 +1246,136 @@ Exit:
     return hr;
 }
 
-/// <summary>
-/// <para>Finds Greatest Common Divisor of two integers.</para>
-/// </summary>
-/// <param name="a">- first integer</param>
-/// <param name="b">- second integer</param>
-/// <returns>The greatest common devisor of "a" and "b"</returns>
 DWORD Aggregator::gcd(DWORD a, DWORD b)
 {
     if (b == 0) return a;
     return gcd(b, a % b);
+}
+
+DWORD WINAPI UDPCaptureThread(LPVOID lpParam)
+{
+    // Cast void pointer into familiar struct
+    UDPCAPTURETHREADPARAM* pCaptureThreadParam = (UDPCAPTURETHREADPARAM*)lpParam;
+    
+    // Create UDP server socket
+    SOCKET* server = CreateSocketUDP();
+
+    if (server != NULL)
+    {
+        // Put thread into listen loop
+        UDPAudioBuffer::ReceiveDataUDP(server,
+            pCaptureThreadParam->sUDPServerIP,
+            pCaptureThreadParam->pUDPAudioBuffer,
+            pCaptureThreadParam->nWASANNodes,
+            pCaptureThreadParam->bDone);
+
+        // Destroy socket after server returns from the receive routine
+        CloseSocketUDP(server);
+    }
+    std::cout << MSG << "UDP capture thread exited." << std::endl;
+
+    return 0;
+}
+
+DWORD WINAPI WASAPICaptureThread(LPVOID lpParam)
+{
+    HRESULT hr = ERROR_SUCCESS;
+    // Cast void pointer into familiar struct
+    WASAPICAPTURETHREADPARAM* pCaptureThreadParam = (WASAPICAPTURETHREADPARAM*)lpParam;
+
+    // Capture endpoint buffer data in a poll-based fashion
+    while (!*pCaptureThreadParam->bDone)
+    {
+        // Captures data from all devices
+        for (UINT32 i = 0; i < pCaptureThreadParam->nDevices; i++)
+        {
+            hr = pCaptureThreadParam->pCaptureClient[i]->GetNextPacketSize(pCaptureThreadParam->nEndpointPackets[i]);
+                EXIT_ON_ERROR(hr)
+
+            if (*pCaptureThreadParam->nEndpointPackets[i] > 0)
+            {
+                hr = pCaptureThreadParam->pCaptureClient[i]->GetBuffer(&pCaptureThreadParam->pData[i],
+                                                pCaptureThreadParam->nEndpointBufferSize[i],
+                                                pCaptureThreadParam->flags[i], NULL, NULL);
+                    EXIT_ON_ERROR(hr)
+
+                if (*pCaptureThreadParam->flags[i] & AUDCLNT_BUFFERFLAGS_SILENT)
+                    pCaptureThreadParam->pData[i] = NULL;  // Tell PullData to write silence.
+
+                hr = pCaptureThreadParam->pAudioBuffer[i]->PullData(pCaptureThreadParam->pData[i]);
+                    EXIT_ON_ERROR(hr)
+
+                hr = pCaptureThreadParam->pCaptureClient[i]->ReleaseBuffer(*pCaptureThreadParam->nEndpointBufferSize[i]);
+                    EXIT_ON_ERROR(hr)
+            }
+        }
+    }
+
+    std::cout << MSG << "WASAPI capture thread exited." << std::endl;
+
+    return hr;
+
+Exit:
+    return hr;
+}
+
+DWORD WINAPI RenderThread(LPVOID lpParam)
+{
+    HRESULT hr = ERROR_SUCCESS;
+    // Cast void pointer into familiar struct
+    RENDERTHREADPARAM* pRenderThreadParam = (RENDERTHREADPARAM*)lpParam;
+
+    // Creates UDP sockets for each UDPAudioBuffer
+    for (UINT32 i = 0; i < pRenderThreadParam->nWASANNodes; i++)
+        pRenderThreadParam->pUDPAudioBuffer[i]->SetSocketUDP(CreateSocketUDP());
+
+    //-------- Render buffer data in a poll-based fashion
+    while (!*pRenderThreadParam->bDone)
+    {
+        // Pushes data from ring buffer into corresponding devices
+        for (UINT32 i = 0; i < pRenderThreadParam->nDevices; i++)
+        {
+            UINT32 nFrames = pRenderThreadParam->pAudioBuffer[i]->FramesAvailable();
+            if (nFrames > 0)
+            {
+                // Get the lesser of the number of frames to write to the device
+                nFrames = min(nFrames, *pRenderThreadParam->nEndpointBufferSize[i]);
+
+                // Get the pointer from WASAPI where to write data to
+                hr = pRenderThreadParam->pRenderClient[i]->GetBuffer(nFrames, &pRenderThreadParam->pData[i]);
+                    EXIT_ON_ERROR(hr)
+
+                // Load data from AudioBuffer's ring buffer into the WASAPI buffer for this device
+                hr = pRenderThreadParam->pAudioBuffer[i]->PushData(pRenderThreadParam->pData[i], nFrames);
+                    EXIT_ON_ERROR(hr)
+
+                // Release buffer before next packet
+                hr = pRenderThreadParam->pRenderClient[i]->ReleaseBuffer(nFrames, *pRenderThreadParam->flags[i]);
+                    EXIT_ON_ERROR(hr)
+            }
+        }
+
+        // Pushes data from ring buffer into corresponding WASAN render nodes over UDP
+        for (UINT32 i = 0; i < pRenderThreadParam->nWASANNodes; i++)
+        {
+            UINT32 nFrames = pRenderThreadParam->pUDPAudioBuffer[i]->FramesAvailable();
+            if (nFrames > 0)
+            {
+                // Get the lesser of the number of frames to write to the device
+                nFrames = min(nFrames, *pRenderThreadParam->nEndpointBufferSize[pRenderThreadParam->nDevices + i]);
+
+                // Load data from UDPAudioBuffer's ring buffer into the buffer for this device
+                pRenderThreadParam->pUDPAudioBuffer[i]->SendDataUDP(nFrames);
+            }
+        }
+    }
+    
+    // Destroy sockets after UDP clients are done pushing data to server
+    for (UINT32 i = 0; i < pRenderThreadParam->nWASANNodes; i++)
+        CloseSocketUDP(pRenderThreadParam->pUDPAudioBuffer[i]->GetSocketUDP());
+
+    return hr;
+
+Exit:
+    return hr;
 }
