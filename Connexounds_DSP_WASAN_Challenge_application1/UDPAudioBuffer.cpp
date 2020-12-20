@@ -1,6 +1,6 @@
 /*
 	TODO:
-		I.------include packet sequence number in the to synchronize sender and receiver.
+		I.------include packet sequence number in each packet to synchronize sender and receiver.
 */
 
 #include "UDPAudioBuffer.h"

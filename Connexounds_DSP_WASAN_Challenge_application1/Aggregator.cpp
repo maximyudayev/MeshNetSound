@@ -5,26 +5,16 @@
                 2. Sample-rate conversion.
                 3. Output channel mask changes.
                 4. Circular buffer size.
-        II.-----multithread the aggregator so that each thread is responsible for each set of functionality:
-                a. Control lane for communication with JUCE/DSP.
-                b. Capture and pre-processing of data.
-        III.----convert class into a thread-safe Singleton.
-        IV.-----facilitate modularity for cross-platform portability.
-        V.------provide better device friendly names (i.e Max's Airpods, etc.)
-        VI.-----convert class into a thread-safe Singleton.
-        VII.----turn into a separate thread to provide additional functionality without waiting 
-                for CPU or delaying processing of incoming data.
-        IIX.----incorporate more user input verification.
-        IX.-----check if the input is actually a number (atoi is not safe if input is not an integer)
-        X.------perform setup of WiFi-direct and virtual audio devices before listing WASAPI devices;
+        II.-----facilitate modularity for cross-platform portability.
+        III.----perform setup of WiFi-direct and virtual audio devices before listing WASAPI devices;
                 display all appropriate capture/render devices together.
-        XI.-----ensure graceful Exit strategy in all methods, currently not all scenarios are considered
+        IV.-----ensure graceful Exit strategy in all methods, currently not all scenarios are considered
                 and not all memory is freed.
-        XII.----provide safety when an audio device is removed, hot plugged while program is running.
-        XIII.---do CLI user input validation.
-        XIV.----negotiate WASAN node metadata across participating nodes to establish stream format dynamically.
-        XV.-----create an optimally sized for target PC thread pool to process in parallel audio streams.
-        XVI.----consider adapting wireless code into an inheriting WASAPI audio client class.
+        V.------provide safety when an audio device is removed, hot plugged while program is running.
+        VI.-----do CLI user input validation.
+        VII.----negotiate WASAN node metadata across participating nodes to establish stream format dynamically.
+        IIX.----create an optimally sized for target PC thread pool to process in parallel audio streams.
+        IX.-----consider adapting wireless code into an inheriting WASAPI audio client class.
 */
 
 #include "Aggregator.h"
@@ -354,11 +344,18 @@ HRESULT Aggregator::InitializeCapture()
     
     //-------- Instantiate AudioBuffer for each user-chosen capture device
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE]; i++)
-        pAudioBuffer[AGGREGATOR_CAPTURE][i] = new AudioBuffer("Hardware Capture Device " + std::to_string(i) + " ", pAudioBufferGroupId[0]);
+        pAudioBuffer[AGGREGATOR_CAPTURE][i] = 
+            new AudioBuffer(
+                "Hardware Capture Device " + std::to_string(i) + " ", 
+                pAudioBufferGroupId[0]);
 
     //-------- Instantiate AudioBuffer for each user-chosen WASAN capture node
     for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_CAPTURE]; i++)
-        pAudioBuffer[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = new UDPAudioBuffer("WASAN Capture Node " + std::to_string(i) + " ", pAudioBufferGroupId[0], pWASANNodeIP[AGGREGATOR_CAPTURE] + i * AGGREGATOR_CIN_IP_LEN);
+        pAudioBuffer[AGGREGATOR_CAPTURE][nDevices[AGGREGATOR_CAPTURE] + i] = 
+            new UDPAudioBuffer(
+                "WASAN Capture Node " + std::to_string(i) + " ", 
+                pAudioBufferGroupId[0], 
+                pWASANNodeIP[AGGREGATOR_CAPTURE] + i * AGGREGATOR_CIN_IP_LEN);
 
     //-------- Notify the audio sink which format to use
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
@@ -589,11 +586,18 @@ HRESULT Aggregator::InitializeRender()
 
     //-------- Instantiate AudioBuffer for each user-chosen render device
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER]; i++)
-        pAudioBuffer[AGGREGATOR_RENDER][i] = new AudioBuffer("Hardware Render Device " + std::to_string(i) + " ", pAudioBufferGroupId[1]);
+        pAudioBuffer[AGGREGATOR_RENDER][i] = 
+            new AudioBuffer(
+                "Hardware Render Device " + std::to_string(i) + " ", 
+                pAudioBufferGroupId[1]);
 
     //-------- Instantiate AudioBuffer for each user-chosen WASAN render node
     for (UINT32 i = 0; i < nWASANNodes[AGGREGATOR_RENDER]; i++)
-        pAudioBuffer[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = new UDPAudioBuffer("WASAN Render Node " + std::to_string(i) + " ", pAudioBufferGroupId[1], pWASANNodeIP[AGGREGATOR_RENDER] + i * AGGREGATOR_CIN_IP_LEN);
+        pAudioBuffer[AGGREGATOR_RENDER][nDevices[AGGREGATOR_RENDER] + i] = 
+            new UDPAudioBuffer(
+                "WASAN Render Node " + std::to_string(i) + " ", 
+                pAudioBufferGroupId[1], 
+                pWASANNodeIP[AGGREGATOR_RENDER] + i * AGGREGATOR_CIN_IP_LEN);
 
     //-------- Notify the audio source which format to use
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
@@ -1335,22 +1339,20 @@ DWORD WINAPI RenderThread(LPVOID lpParam)
         // Pushes data from ring buffer into corresponding devices
         for (UINT32 i = 0; i < pRenderThreadParam->nDevices; i++)
         {
-            UINT32 nFrames = pRenderThreadParam->pAudioBuffer[i]->FramesAvailable();
-            if (nFrames > 0)
+            // Wait for the ring buffer corresponding to this channel-masked device to exceed the number of samples
+            // needed to ensure SRC does not come short on original samples when filling output device's buffer
+            if (pRenderThreadParam->pAudioBuffer[i]->FramesAvailable() >= pRenderThreadParam->pAudioBuffer[i]->GetMinFramesOut())
             {
-                // Get the lesser of the number of frames to write to the device
-                nFrames = min(nFrames, *pRenderThreadParam->nEndpointBufferSize[i]);
-
                 // Get the pointer from WASAPI where to write data to
-                hr = pRenderThreadParam->pRenderClient[i]->GetBuffer(nFrames, &pRenderThreadParam->pData[i]);
+                hr = pRenderThreadParam->pRenderClient[i]->GetBuffer(*pRenderThreadParam->nEndpointBufferSize[i], &pRenderThreadParam->pData[i]);
                     EXIT_ON_ERROR(hr)
 
                 // Load data from AudioBuffer's ring buffer into the WASAPI buffer for this device
-                hr = pRenderThreadParam->pAudioBuffer[i]->PushData(pRenderThreadParam->pData[i], nFrames);
+                hr = pRenderThreadParam->pAudioBuffer[i]->PushData(pRenderThreadParam->pData[i], *pRenderThreadParam->nEndpointBufferSize[i]);
                     EXIT_ON_ERROR(hr)
 
                 // Release buffer before next packet
-                hr = pRenderThreadParam->pRenderClient[i]->ReleaseBuffer(nFrames, *pRenderThreadParam->flags[i]);
+                hr = pRenderThreadParam->pRenderClient[i]->ReleaseBuffer(*pRenderThreadParam->nEndpointBufferSize[i], *pRenderThreadParam->flags[i]);
                     EXIT_ON_ERROR(hr)
             }
         }

@@ -55,7 +55,7 @@
 #define RESAMPLER_N_QUALITY_H 35		            // Some freaky alien quality
 
 //-------- Debug Macros
-#define DEBUG                                       // flag aiding in automatic exit after 10s
+#define DEBUG                                       
 
 #define MSG "[MSG]: "
 #define WARN "[WRN]: "
@@ -82,7 +82,6 @@
 //-------- Error Macros
 #define ERR_OK 0
 #define ERR_UDP_SOCKET_CREATE 1
-
 
 //-------- Type Definitions
 typedef double DOUBLE;

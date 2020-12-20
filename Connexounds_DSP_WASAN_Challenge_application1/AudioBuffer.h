@@ -139,6 +139,20 @@ class AudioBuffer
 		/// </summary>
 		/// <returns></returns>		
 		UINT32 FramesAvailable();
+
+		/// <summary>
+		/// <para>Update the nMinFramesOut variable for the device associated with this AudioBuffer.</para>
+		/// <para>Must be called for render responsible AudioBuffer after changing resampling factor 
+		/// ENDPOINTFMT.nBufferSize.</para>
+		/// </summary>
+		/// <returns></returns>
+		HRESULT UpdateMinFramesOut();
+
+		/// <summary>
+		/// <para>Get nMinFramesOut varible for the device associated with this AudioBuffer.</para>
+		/// </summary>
+		/// <returns>Least number of frames needed for safe SRC for this device.</returns>
+		UINT32 GetMinFramesOut();
 		
 	protected:
 		/// <summary>
@@ -162,9 +176,16 @@ class AudioBuffer
 		Resampler			* pResampler;
 		RESAMPLEFMT			tResampleFmt;
 		UINT32				nChannelOffset,					// Index of the device's 1st channel in the aggregated ring buffer		
-							nTimeAlignOffset				{ 0 };
+							nTimeAlignOffset				{ 0 },
+							nMinFramesOut					{ 0 };		// Indicator for output ring buffer when safe to SRC for output
+																		// to avoid coming short on samples
 		BOOL				bWriteAheadReadByLap			{ FALSE };
-
+		SRWLOCK				srwWriteOffset,					// R/W Locks protect buffer offset variables from being overwritten by 
+							srwReadOffset,					// a producer thread while a consumer thread uses them.
+							srwWriteAheadReadByLap;			// Ensures that ring buffer samples of a corresponding device can be
+															// overwritten (in case consumer is slower than producer, i.e DSP vs. capture)
+															// only when no consumer thread is in the process of reading data 
+															// from the ring buffer.
 		// Endpoint buffer related variables
 		ENDPOINTFMT			tEndpointFmt;
 

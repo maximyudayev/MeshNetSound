@@ -102,11 +102,16 @@ class Resampler
 		/// and traverses toward the smallest - potentially reduces precision of float results.</para>
 		/// </summary>
 		/// <param name="tResampleFmt">- alias of the corresponding endpoint's resampling details.</param>
-		/// <param name="tEndpointFmt">- alias of the corresponding endpoint's WASAPI details.</param>
+		/// <param name="tEndpointFmt">- alias of the corresponding endpoint's device details.</param>
 		/// <param name="nChannelOffset">- first channel index into the ring buffer of the Resampler's parent AudioBuffer.</param>
-		/// <param name="pData">- pointer to the WASAPI-returned audio data buffer to read from.</param>
+		/// <param name="pDataSrc">- pointer to corresponding devices linear buffer to read from.</param>
+		/// <param name="pDataDst">- pointer to corresponding devices linear buffer to write into.</param>
+		/// <param name="nFramesLimit">- if bIn is set to FALSE (writing to a render device buffer) used to tell the function when
+		/// to stop resampling to still fit within the size of the device's render buffer; ignored otherwise.</param>
+		/// <param name="bIn">- indicator if pDataSrc is a pointer to a capture buffer (moving captured data into ring buffer) 
+		/// or to a ring buffer (moving processed data out of ring buffer into linear render buffer).</param>
 		/// <returns>Returns the number of resampled values written to the buffer.</returns>		
-		UINT32 Resample(RESAMPLEFMT& pResampleFmt, ENDPOINTFMT& pEndpointFmt, UINT32 nChannelOffset, BYTE* pData);
+		UINT32 Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt, UINT32 nChannelOffset, BYTE** pDataSrc, BYTE** pDataDst, UINT32 nFramesLimit, BOOL bIn);
 
 	private:
 		/// <summary>
