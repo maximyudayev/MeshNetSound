@@ -14,6 +14,8 @@
 #include "UDPAudioBuffer.h"
 #include "Resampler.h"
 #include "AudioEffect.h"
+#include "config.h"
+
 
 typedef struct UDPCaptureThreadParam {
 	CHAR* sUDPServerIP;
@@ -73,6 +75,8 @@ DWORD WINAPI RenderThread(LPVOID lpParam);
 /// functionality for audio effect object manipulation.</para>
 /// </summary>
 /// <param name="lpParam"></param>
+
+
 /// <returns></returns>
 DWORD WINAPI DSPThread(LPVOID lpParam);
 

@@ -148,6 +148,7 @@
   <ItemGroup>
     <ClInclude Include="Aggregator.h" />
     <ClInclude Include="AudioBuffer.h" />
+    <ClInclude Include="AudioEffect.h" />
     <ClInclude Include="config.h" />
     <ClInclude Include="Flanger.h" />
     <ClInclude Include="PitchShifter.h" />

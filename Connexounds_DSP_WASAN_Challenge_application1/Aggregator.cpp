@@ -1371,7 +1371,8 @@ DWORD WINAPI RenderThread(LPVOID lpParam)
             }
         }
     }
-    
+
+   
     // Destroy sockets after UDP clients are done pushing data to server
     for (UINT32 i = 0; i < pRenderThreadParam->nWASANNodes; i++)
         CloseSocketUDP(pRenderThreadParam->pUDPAudioBuffer[i]->GetSocketUDP());
@@ -1386,3 +1387,5 @@ DWORD WINAPI DSPThread(LPVOID lpParam)
 {
     return 0;
 }
+
+

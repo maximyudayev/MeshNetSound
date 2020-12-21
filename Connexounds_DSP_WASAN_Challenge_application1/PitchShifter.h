@@ -1,28 +1,48 @@
 #pragma once
-#define LATENCY_TIME 0.010           // specifies the transposition range in milliseconds (used for allocation of delay buffer)
+#define _USE_MATH_DEFINES
+#define TRANSPOSITION 480           // specifies the transposition range in samples (used for allocation of delay buffer)
+
+#include "AudioEffect.h"
+#include "AudioBuffer.h"
+#include <cmath>
+
 
 /// <summary>
 /// Class implementing a Doppler effect based pitch shifting algorithm.
 /// </summary>
-class PitchShifter 
+class PitchShifter : public AudioEffect
 {
     public:
-        PitchShifter(){}
-
-        /// <summary>
-        /// <para>Initialization of the delay buffer, harcoded for 2 channels atm for demonstration purposes.</para>
-        /// <para>Regarding scalibiltiy, nr. of channels and buffer size should be provided as parameters under GUI control.</para>
-        /// </summary>
-        /// <param name="SamplesPerBlockExpected"></param>
-        /// <param name="SampleRate"></param>
-        void initialize(int SamplesPerBlockExpected, double SampleRate)
+        PitchShifter(int sampleRate, int nrOfChannels)
         {
-            transposition_range = LATENCY_TIME * SampleRate;
-            delayBufferSize = SamplesPerBlockExpected + transposition_range;
-            delayBuffer.setSize(2, delayBufferSize);
-            delayBuffer.clear();
+            delayBufferSize = TRANSPOSITION * 2;
+
+            // allocate heap structure for delay buffer
+
+            delayBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
+            for (auto i = 0; i < nrOfChannels; i++)
+            {
+                delayBuffer[i] = (float*)malloc(sizeof(float) * delayBufferSize);
+            }   
+            
+
+            this->sampleRate = sampleRate;
+            this->nrOfChannels = nrOfChannels;
         }
 
+        ~PitchShifter()
+        {
+            // free heap structure for delay buffer
+
+            for (int i = 0; i < nrOfChannels; i++)
+            {
+                float* currentIntPtr = delayBuffer[i];
+                free(currentIntPtr);
+            }
+            
+        }
+
+        
         /// <summary>
         /// <para>Actual DSP callback, applyies the pitch shift to a single channel.</para>
         /// <para>Note: when using multi-channel (polyphonic) pitch shift, must be called 
@@ -39,30 +59,43 @@ class PitchShifter
         /// <param name="maxDelayInSamples"></param>
         /// <param name="channel"></param>
         /// <param name="deviceGain"></param>
-        void process(AudioBuffer<float>* inbuffer, int startSample, int numSamples, int maxDelayInSamples, int channel, float deviceGain)						
+        void process(DSPPacket* inbuffer) override
         {
-            float* writeBuffer = inbuffer->getWritePointer(channel, startSample);
+            FLOAT** processBuffer = inbuffer->pData;
+            UINT32  nrOfChannels = inbuffer->nChannels;
+            UINT32  nrOfSamples = inbuffer->nSamples;
 
-            const int delayBufferSize = delayBuffer.getNumSamples();
-            fillDelaybuffer(inbuffer->getNumSamples(), channel, delayBufferSize, inbuffer->getReadPointer(channel, startSample), 1.0);
 
-            for (auto sample = 0; sample < numSamples; ++sample)
+            for (auto channel = 0; channel < nrOfChannels; ++channel)
+
             {
-                const float* delay = delayBuffer.getReadPointer(channel, startSample);
+                fillDelaybuffer(nrOfSamples, channel, processBuffer[channel], 1.0);
 
-                float delaySamples1 = sawtooth1(maxDelayInSamples, channel);
-                float delaySamples2 = sawtooth2(maxDelayInSamples, channel);
-                int delayTime1 = static_cast<int>(delaySamples1);
-                int delayTime2 = static_cast<int>(delaySamples2);
+                for (auto sample = 0; sample < inbuffer->nSamples; ++sample)
+                {
+                    const float* delay = delayBuffer[channel];
 
-                int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTime1) % delayBufferSize;
-                int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTime2) % delayBufferSize;
+                    float delaySamples1 = sawtooth1(TRANSPOSITION, channel);
+                    float delaySamples2 = sawtooth2(TRANSPOSITION, channel);
+                    int delayTime1 = static_cast<int>(delaySamples1);
+                    int delayTime2 = static_cast<int>(delaySamples2);
 
-                float gain1 = sin(double_Pi * delaySamples1 / maxDelayInSamples);
-                float gain2 = sin(double_Pi * delaySamples2 / maxDelayInSamples);
+                    int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTime1) % delayBufferSize;
+                    int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTime2) % delayBufferSize;
 
-                writeBuffer[sample] = deviceGain*(gain1 * (delay[(readPosition1 + sample) % delayBufferSize]) + gain2 * (delay[(readPosition2 + sample) % delayBufferSize]));
+
+                    float gain1 = sin(M_PI * delaySamples1 / TRANSPOSITION);
+                    float gain2 = sin(M_PI * delaySamples2 / TRANSPOSITION);
+
+                    processBuffer[channel][sample] = gain1 * (delay[(readPosition1 + sample) % delayBufferSize]) + gain2 * (delay[(readPosition2 + sample) % delayBufferSize]);
+
+
+                }
+
             }
+            
+            
+            
         }
 
         /// <summary>
@@ -77,17 +110,41 @@ class PitchShifter
         /// <param name="delayBufferLength"></param>
         /// <param name="bufferData"></param>
         /// <param name="gain"></param>
-        void fillDelaybuffer(const int bufferLength, int channel, const int delayBufferLength, const float* bufferData, const float gain)
+        void fillDelaybuffer(const int bufferLength, int channel, float* bufferData, const float gain)
         {
-            if (delayBufferLength > bufferLength + delayBufferWritePosition)
+
+            if (delayBufferSize > bufferLength + delayBufferWritePosition)
+
             {
-                delayBuffer.copyFromWithRamp(channel, delayBufferWritePosition, bufferData, bufferLength, gain, gain);
+                // Copy data from main input ring buffer chunk into delay buffer
+
+                for (auto sample = 0; sample < bufferLength; sample++)
+                {
+                    delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
+                }
+                 
             }
+
             else
             {
-                const int delayBufferRemaining = delayBufferLength - delayBufferWritePosition;
-                delayBuffer.copyFromWithRamp(channel, delayBufferWritePosition, bufferData, delayBufferRemaining, gain, gain);
-                delayBuffer.copyFromWithRamp(channel, 0, bufferData + delayBufferRemaining, bufferLength - delayBufferRemaining, gain, gain);
+
+                const int delayBufferRemaining = delayBufferSize - delayBufferWritePosition;
+                
+                // Copy data from main input ring buffer chunk that still fits into delay buffer
+
+                for (auto sample = 0; sample < delayBufferRemaining; sample++)
+                {
+                    delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
+                }
+
+                // Copy the rest of the data from main input ring buffer chunk into delay buffer
+
+                for (auto sample = 0; sample < delayBufferRemaining; sample++)
+                {
+                    delayBuffer[channel][sample] = gain * bufferData[delayBufferRemaining + sample];
+                }
+
+             
             }
         }
 
@@ -162,16 +219,16 @@ class PitchShifter
         }
 
     private:
-        float                       sawtoothPhase1[2]           { 0.0 }, 
+        float                       sawtoothPhase1[2]           { 0.0, 0.0 }, 
                                     sawtoothPhase2[2]           { 0.5, 0.5 },  // sawtooth functions shifted by pi/2 with respect to each other
                                     sawtoothFrequency           { 0.0 },
                                     sampleRate                  { 44100 };
         
         int                         delayBufferWritePosition    { 0 },
-                                    transposition_range,
-                                    delayBufferSize;
+                                    delayBufferSize,
+                                    nrOfChannels;
         
         bool                        pitchUporDown               { FALSE };
 
-        juce::AudioBuffer<float>    delayBuffer;
+        float**                     delayBuffer;
 };

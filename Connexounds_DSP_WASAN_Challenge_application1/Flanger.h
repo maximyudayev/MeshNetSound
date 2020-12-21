@@ -1,29 +1,58 @@
 #pragma once
-#define LATENCY_TIME 0.010
+#define _USE_MATH_DEFINES
+#define TRANSPOSITION 480           // specifies the transposition range in samples (used for allocation of delay buffer)
+
+#include "AudioEffect.h"
+#include "AudioBuffer.h"
+#include <cmath>
 
 /// <summary>
 /// Class implementing a flanger algorithm using an FIR comb filter with optional feedback.
 /// </summary>
-class Flanger 
+class Flanger : public AudioEffect
 {
 	public:
-		Flanger(){}
-
-		/// <summary>
-		/// <para>Initialization of the delay buffer, hardcoded for 2 channels atm for demonstration purposes.</para>
-		/// <para>Regarding scalibiltiy, nr. of channels and buffer size should be provided as parameters under GUI control.</para>
-		/// </summary>
-		/// <param name="SamplesPerBlockExpected"></param>
-		/// <param name="SampleRate"></param>
-		void initialize(int SamplesPerBlockExpected, double SampleRate)
+		Flanger(int sampleRate, int nrOfChannels)
 		{
-			transposition_range = LATENCY_TIME * SampleRate;
-			delayBufferSize = SamplesPerBlockExpected + transposition_range;
-			delayBuffer.setSize(2, delayBufferSize);
-			delayBuffer.clear();
+			delayBufferSize = TRANSPOSITION * 2;
 
-			feedbackBuffer.setSize(2, delayBufferSize);
-			feedbackBuffer.clear();
+			// allocate heap structure for delay buffer
+
+			delayBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
+			for (auto i = 0; i < nrOfChannels; i++)
+			{
+				delayBuffer[i] = (float*)malloc(sizeof(float) * delayBufferSize);
+			}
+			
+			// allocate heap structure for feedback buffer (same size as delaybuffer)
+
+			feedbackBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
+			for (auto i = 0; i < nrOfChannels; i++)
+			{
+				feedbackBuffer[i] = (float*)malloc(sizeof(float) * delayBufferSize);
+			}
+
+			this->sampleRate = sampleRate;
+			this->nrOfChannels = nrOfChannels;
+		}
+
+		~Flanger()
+		{
+			// free heap structure for delay buffer
+
+			for (int i = 0; i < nrOfChannels; i++)
+			{
+				float* currentIntPtr = delayBuffer[i];
+				free(currentIntPtr);
+			}
+
+			for (int i = 0; i < nrOfChannels; i++)
+			{
+				float* currentIntPtr = feedbackBuffer[i];
+				free(currentIntPtr);
+			}
+
+
 		}
 
         /// <summary>
@@ -39,34 +68,39 @@ class Flanger
         /// <param name="maxDelayInSamples"></param>
         /// <param name="channel"></param>
         /// <param name="DeviceGain"></param>
-        void process(AudioBuffer<float>* inbuffer, int startSample, int numSamples, int maxDelayInSamples, int channel, float DeviceGain)						// pass input buffer by reference, get maxDelayInSamples from UI component
+        void process(DSPPacket* inbuffer)	override					// pass input buffer by reference, get maxDelayInSamples from UI component
         {
-			float* writeBuffer = inbuffer->getWritePointer(channel, startSample);
-			const float* readBuffer =  inbuffer->getReadPointer(channel, startSample);
+			FLOAT** processBuffer = inbuffer->pData;
+			UINT32  nrOfChannels = inbuffer->nChannels;
+			UINT32  nrOfSamples = inbuffer->nSamples;
 			
-
-			const int delayBufferSize = delayBuffer.getNumSamples();
-			fillDelaybuffer(inbuffer->getNumSamples(), channel, delayBufferSize, readBuffer, 1.0);
-
-			for (auto sample = 0; sample < numSamples; ++sample)
+			
+			for (auto channel = 0; channel < nrOfChannels; ++channel)
 
 			{
-				const float* delay = delayBuffer.getReadPointer(channel, startSample);
-				const float* feedback = feedbackBuffer.getReadPointer(channel, startSample);
+				fillDelaybuffer(nrOfSamples, channel, processBuffer[channel], 1.0);
 
-				float delayTime = lfo_sinewave(maxDelayInSamples, channel);
-				int delayTimeInSamples = static_cast<int>(delayTime);
-				float fractionalDelay = delayTime - delayTimeInSamples;
+				for (auto sample = 0; sample < nrOfSamples; ++sample)
 
-				int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples) % delayBufferSize;		          // perform linear interpolation for now
-				int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples - 1) % delayBufferSize;
+				{
+					const float* delay = delayBuffer[channel];
+					const float* feedback = feedbackBuffer[channel];
 
-				float output = writeBuffer[sample] + flangerDepth*((1.0-fractionalDelay)*delay[(readPosition1 + sample) % delayBufferSize] + fractionalDelay *delay[(readPosition2 + sample) % delayBufferSize])
-					+ feedbackLevel*((1.0-fractionalDelay)* feedback[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * feedback[(readPosition2 + sample) % delayBufferSize]);
-				
-				feedbackBuffer.setSample(channel, feedbackBufferWritePosition + sample, output);
-				writeBuffer[sample] = DeviceGain*output;
+					float delayTime = lfo_sinewave(TRANSPOSITION, channel);
+					int delayTimeInSamples = static_cast<int>(delayTime);
+					float fractionalDelay = delayTime - delayTimeInSamples;
 
+					int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples) % delayBufferSize;		          // perform linear interpolation for now
+					int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples - 1) % delayBufferSize;
+
+					float output = processBuffer[channel][sample] + flangerDepth * ((1.0 - fractionalDelay) * delay[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * delay[(readPosition2 + sample) % delayBufferSize])
+						+ feedbackLevel * ((1.0 - fractionalDelay) * feedback[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * feedback[(readPosition2 + sample) % delayBufferSize]);
+
+					feedbackBuffer[channel][feedbackBufferWritePosition + sample] = output;
+						
+					processBuffer[sample][channel] = output;
+
+				}
 			}
         }
 
@@ -80,17 +114,40 @@ class Flanger
 		/// <param name="delayBufferLength"></param>
 		/// <param name="bufferData"></param>
 		/// <param name="gain"></param>
-		void fillDelaybuffer(const int bufferLength, int channel, const int delayBufferLength, const float* bufferData, const float gain)
+		void fillDelaybuffer(const int bufferLength, int channel, float* bufferData, const float gain)
 		{
-			if (delayBufferLength > bufferLength + delayBufferWritePosition)
+
+			if (delayBufferSize > bufferLength + delayBufferWritePosition)
+
 			{
-				delayBuffer.copyFromWithRamp(channel, delayBufferWritePosition, bufferData, bufferLength, gain, gain);
+				// Copy data from main input ring buffer chunk into delay buffer
+
+				for (auto sample = 0; sample < bufferLength; sample++)
+				{
+					delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
+				}
+
 			}
+
 			else
 			{
-				const int delayBufferRemaining = delayBufferLength - delayBufferWritePosition;
-				delayBuffer.copyFromWithRamp(channel, delayBufferWritePosition, bufferData, delayBufferRemaining, gain, gain);
-				delayBuffer.copyFromWithRamp(channel, 0, bufferData + delayBufferRemaining, bufferLength - delayBufferRemaining, gain, gain);
+
+				const int delayBufferRemaining = delayBufferSize - delayBufferWritePosition;
+
+				// Copy data from main input ring buffer chunk that still fits into delay buffer
+
+				for (auto sample = 0; sample < delayBufferRemaining; sample++)
+				{
+					delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
+				}
+
+				// Copy the rest of the data from main input ring buffer chunk into delay buffer
+
+				for (auto sample = 0; sample < delayBufferRemaining; sample++)
+				{
+					delayBuffer[channel][sample] = gain * bufferData[delayBufferRemaining + sample];
+				}
+
 
 			}
 		}
@@ -107,7 +164,7 @@ class Flanger
 		{
 			sinePhase[channel] = sinePhase[channel] + sinefrequency/sampleRate;
 			if (sinePhase[channel] >= 1) sinePhase[channel] -= 1;
-			return (maxDelayInSamples/2)*(sin(2 * double_Pi * sinePhase[channel])+1);
+			return (maxDelayInSamples/2)*(sin(2 * M_PI * sinePhase[channel])+1);
 		}
 
 		/// <summary>
@@ -168,9 +225,9 @@ class Flanger
 		
 		int							delayBufferWritePosition	{ 0 }, 
 									feedbackBufferWritePosition { 0 }, 
-									transposition_range, 
+									nrOfChannels, 
 									delayBufferSize;
 
-		juce::AudioBuffer<float>	delayBuffer, 
-									feedbackBuffer;
+		float**						delayBuffer;
+		float**						feedbackBuffer;
 };
