@@ -48,7 +48,8 @@ typedef struct resampler {
 } RESAMPLERPARAMS;
 
 /// <summary>
-/// Ring Buffer Resampler.
+/// Class performing sample rate conversion on its associated AudioBuffer object
+/// in the data flow pipe in front of and right after the DSP processor.
 /// </summary>
 class Resampler
 {

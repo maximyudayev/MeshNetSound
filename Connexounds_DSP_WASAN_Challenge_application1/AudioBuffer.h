@@ -11,6 +11,11 @@
 #include "config.h"
 #include "Resampler.h"
 
+/// <summary>
+/// Class representing a distinct physical or virtual device with associated ring buffer space,
+/// sample rate conversion details, and auxillary data required for getting data into the 
+/// DSP processor thread.
+/// </summary>
 class AudioBuffer
 {
 	public:

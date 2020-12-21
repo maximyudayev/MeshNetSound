@@ -5,6 +5,10 @@
 #include "AudioBuffer.h"
 #include "UDP.h"
 
+/// <summary>
+/// Class porting WiFi-Direct connected UDP devices to similar AudioBuffer interface
+/// as seen from the caller.
+/// </summary>
 class UDPAudioBuffer : public AudioBuffer
 {
 	public:

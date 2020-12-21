@@ -149,9 +149,14 @@
     <ClInclude Include="Aggregator.h" />
     <ClInclude Include="AudioBuffer.h" />
     <ClInclude Include="config.h" />
+    <ClInclude Include="Flanger.h" />
+    <ClInclude Include="PitchShifter.h" />
     <ClInclude Include="Resampler.h" />
     <ClInclude Include="UDP.h" />
     <ClInclude Include="UDPAudioBuffer.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

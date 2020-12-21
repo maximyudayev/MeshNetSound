@@ -65,6 +65,11 @@ DWORD WINAPI WASAPICaptureThread(LPVOID lpParam);
 /// <returns></returns>
 DWORD WINAPI RenderThread(LPVOID lpParam);
 
+/// <summary>
+/// Class presenting top-level API to the caller that arranges all the configuration
+/// with the user and his/her choice of WASAN topology to create a data pipe into and
+/// out of the DSP processor.
+/// </summary>
 class Aggregator
 {
 	public:
