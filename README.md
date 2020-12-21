@@ -28,7 +28,7 @@ into the memory provided by the kernel for direct playback.
 Storing original equisampled filtered data in the output ring buffer guarantees instant channel multiplexing and ability to route
 same data into simultaneously multiple distinct devices.
 
-### Feature List
+## Feature List
 - [X] **Inter-node audio transfer** - Rx/Tx of streams between WASAN nodes over WiFi-Direct
 - [X] **Recording** - simultaneous recording of stream(s) according to user's request
 - [ ] **Automated time alignment** - periodic TDE
@@ -45,7 +45,10 @@ same data into simultaneously multiple distinct devices.
 - [ ] **Automated setup** - negotiate optimal communication approach, parameter settings, room acoustic evaluation, TDE, etc.
 - [ ] **Push-to-talk** - automatically muting participant when they are not speaking to reduce noise and confusion of participants.
 
-### Dataflow
+System architecture vision.
+![Extended functionality](https://github.com/stijn-reniers/Windows_audio_aggregator/blob/aggregator/images/Presentation%20-%20Current%20Aggregator%20Functionality.png)
+
+## Dataflow
 Picture below shows how data flows internally through the system, starting at the capture side and ending at the render side.
 ![Data flow description](https://github.com/stijn-reniers/Windows_audio_aggregator/blob/aggregator/images/Data%20Flow%20Description.png)
 
