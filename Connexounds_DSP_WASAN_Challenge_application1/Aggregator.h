@@ -9,10 +9,11 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <audiopolicy.h>
 
+#include "config.h"
 #include "AudioBuffer.h"
 #include "UDPAudioBuffer.h"
 #include "Resampler.h"
-#include "config.h"
+#include "AudioEffect.h"
 
 typedef struct UDPCaptureThreadParam {
 	CHAR* sUDPServerIP;
@@ -64,6 +65,16 @@ DWORD WINAPI WASAPICaptureThread(LPVOID lpParam);
 /// <param name="lpParam">- pointer to struct RENDERTHREADPARAM.</param>
 /// <returns></returns>
 DWORD WINAPI RenderThread(LPVOID lpParam);
+
+/// <summary>
+/// <para>Thread running DSP algorithms on the input ring buffer and outputting to
+/// the output ring buffer.</para>
+/// <para>Combines audio effect thread pool together with an interactive CLI
+/// functionality for audio effect object manipulation.</para>
+/// </summary>
+/// <param name="lpParam"></param>
+/// <returns></returns>
+DWORD WINAPI DSPThread(LPVOID lpParam);
 
 /// <summary>
 /// Class presenting top-level API to the caller that arranges all the configuration

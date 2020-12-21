@@ -1,5 +1,4 @@
 #pragma once
-#include <JuceHeader.h>
 #define LATENCY_TIME 0.010           // specifies the transposition range in milliseconds (used for allocation of delay buffer)
 
 /// <summary>
@@ -16,8 +15,8 @@ class PitchShifter
         /// </summary>
         /// <param name="SamplesPerBlockExpected"></param>
         /// <param name="SampleRate"></param>
-        void initialize(int SamplesPerBlockExpected, double SampleRate) {
-
+        void initialize(int SamplesPerBlockExpected, double SampleRate)
+        {
             transposition_range = LATENCY_TIME * SampleRate;
             delayBufferSize = SamplesPerBlockExpected + transposition_range;
             delayBuffer.setSize(2, delayBufferSize);
@@ -59,7 +58,6 @@ class PitchShifter
                 int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTime1) % delayBufferSize;
                 int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTime2) % delayBufferSize;
 
-
                 float gain1 = sin(double_Pi * delaySamples1 / maxDelayInSamples);
                 float gain2 = sin(double_Pi * delaySamples2 / maxDelayInSamples);
 
@@ -81,7 +79,6 @@ class PitchShifter
         /// <param name="gain"></param>
         void fillDelaybuffer(const int bufferLength, int channel, const int delayBufferLength, const float* bufferData, const float gain)
         {
-
             if (delayBufferLength > bufferLength + delayBufferWritePosition)
             {
                 delayBuffer.copyFromWithRamp(channel, delayBufferWritePosition, bufferData, bufferLength, gain, gain);
@@ -91,9 +88,7 @@ class PitchShifter
                 const int delayBufferRemaining = delayBufferLength - delayBufferWritePosition;
                 delayBuffer.copyFromWithRamp(channel, delayBufferWritePosition, bufferData, delayBufferRemaining, gain, gain);
                 delayBuffer.copyFromWithRamp(channel, 0, bufferData + delayBufferRemaining, bufferLength - delayBufferRemaining, gain, gain);
-
             }
-
         }
 
         /// <summary>
@@ -105,8 +100,8 @@ class PitchShifter
         /// <param name="maxDelayInSamples"></param>
         /// <param name="channel"></param>
         /// <returns>A float at this point. Leaves room for possible (linear) interpolation of the delay time.</returns>
-        float sawtooth1(int maxDelayInSamples, int channel) {																	
-
+        float sawtooth1(int maxDelayInSamples, int channel)
+        {
             float samplespercycle = sampleRate / sawtoothFrequency;
             sawtoothPhase1[channel] += (1 / samplespercycle);   																
             if (sawtoothPhase1[channel] >= 1) sawtoothPhase1[channel] -= 1;
@@ -114,21 +109,19 @@ class PitchShifter
             if (pitchUporDown == true) return maxDelayInSamples * (1 - sawtoothPhase1[channel]);
         }
 
-
         /// <summary>
         /// 
         /// </summary>
         /// <param name="maxDelayInSamples"></param>
         /// <param name="channel"></param>
         /// <returns></returns>
-        float sawtooth2(int maxDelayInSamples, int channel) {
-        
+        float sawtooth2(int maxDelayInSamples, int channel) 
+        {
             float samplespercycle = sampleRate / sawtoothFrequency;                                                             
             sawtoothPhase2[channel] += (1 / samplespercycle);   																
             if (sawtoothPhase2[channel] >= 1) sawtoothPhase2[channel] -= 1;
             if (pitchUporDown == false) return maxDelayInSamples * sawtoothPhase2[channel];
             if (pitchUporDown == true) return maxDelayInSamples * (1 - sawtoothPhase2[channel]);
-
         }
 
         /// <summary>

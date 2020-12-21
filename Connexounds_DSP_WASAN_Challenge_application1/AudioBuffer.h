@@ -10,6 +10,14 @@
 #include <string>
 #include "config.h"
 #include "Resampler.h"
+#include "AudioEffect.h"
+
+//////// MOVE TO AudioEffect.h ////////
+typedef struct DSPPacket {
+	UINT32 nFrames;
+	UINT32 nChannels;
+	FLOAT** pData;
+} DSPPACKET; 
 
 /// <summary>
 /// Class representing a distinct physical or virtual device with associated ring buffer space,
@@ -139,6 +147,10 @@ class AudioBuffer
 		/// <returns></returns>		
 		HRESULT PushData(BYTE* pData, UINT32 nFrames);
 		
+		HRESULT ReadNextPacket(AudioEffect* pEffect);
+
+		HRESULT WriteNextPacket(AudioEffect* pEffect);
+
 		/// <summary>
 		/// <para>Gets the number of frames in the buffer available for reading.</para>
 		/// </summary>

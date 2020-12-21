@@ -1381,3 +1381,8 @@ DWORD WINAPI RenderThread(LPVOID lpParam)
 Exit:
     return hr;
 }
+
+DWORD WINAPI DSPThread(LPVOID lpParam)
+{
+    return 0;
+}

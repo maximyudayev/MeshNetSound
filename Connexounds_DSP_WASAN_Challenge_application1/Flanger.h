@@ -1,5 +1,4 @@
 #pragma once
-#include <JuceHeader.h>
 #define LATENCY_TIME 0.010
 
 /// <summary>
