@@ -66,8 +66,8 @@ class Flanger : public AudioEffect
         void process(DSPPacket* inbuffer)	override					// pass input buffer by reference, get maxDelayInSamples from UI component
         {
 			FLOAT** processBuffer = inbuffer->pData;
-			UINT32  nrOfChannels = inbuffer->nChannels;
-			UINT32  nrOfSamples = inbuffer->nSamples;
+			nrOfChannels = inbuffer->nChannels;
+			nrOfSamples = inbuffer->nSamples;
 			
 			for (auto channel = 0; channel < nrOfChannels; ++channel)
 			{
@@ -90,10 +90,35 @@ class Flanger : public AudioEffect
 
 					feedbackBuffer[channel][feedbackBufferWritePosition + sample] = output;
 						
-					processBuffer[sample][channel] = output;
+					processBuffer[channel][sample] = output;
+					outputBuffer = processBuffer;
+
+
 				}
 			}
         }
+
+		
+		/// <summary>
+		/// <para>Returns the data of the specified channel of the processed buffer.</para>
+		/// </summary>
+		/// <param name="bufferLength"></param>
+		
+		float* getChannelData(int nChannel) override
+		{
+			return outputBuffer[nChannel];
+		}
+
+
+		/// <summary>
+		/// <para>Returns number of samples of the specified channel of the processed buffer.</para>
+		/// </summary>
+		/// <param name="bufferLength"></param>
+
+		int getNumSamples() override
+		{
+			return nrOfSamples;
+		}
 
 		/// <summary>
 		/// <para>Copies each packet received at the callback into the circular delay buffer.</para>
@@ -206,8 +231,15 @@ class Flanger : public AudioEffect
 					** delayBuffer,
 					** feedbackBuffer;
 		
-		int			delayBufferWritePosition	{ 0 }, 
-					feedbackBufferWritePosition { 0 }, 
-					nrOfChannels, 
-					delayBufferSize;
+
+		int							delayBufferWritePosition	{ 0 }, 
+									feedbackBufferWritePosition { 0 }, 
+									nrOfChannels,
+									nrOfSamples,
+									delayBufferSize;
+
+		float**						delayBuffer;
+		float**						feedbackBuffer;
+		float**						outputBuffer;
+
 };

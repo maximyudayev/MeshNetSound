@@ -57,8 +57,8 @@ class PitchShifter : public AudioEffect
         void process(DSPPacket* inbuffer) override
         {
             FLOAT** processBuffer = inbuffer->pData;
-            UINT32  nrOfChannels = inbuffer->nChannels;
-            UINT32  nrOfSamples = inbuffer->nSamples;
+            nrOfChannels = inbuffer->nChannels;
+            nrOfSamples = inbuffer->nSamples;
 
             for (auto channel = 0; channel < nrOfChannels; ++channel)
             {
@@ -80,8 +80,33 @@ class PitchShifter : public AudioEffect
                     float gain2 = sin(M_PI * delaySamples2 / TRANSPOSITION);
 
                     processBuffer[channel][sample] = gain1 * (delay[(readPosition1 + sample) % delayBufferSize]) + gain2 * (delay[(readPosition2 + sample) % delayBufferSize]);
+
+                    outputBuffer = processBuffer;
+
+
                 }
             }
+        }
+
+        /// <summary>
+        /// <para>Returns the data of the specified channel of the processed buffer.</para>
+        /// </summary>
+        /// <param name="bufferLength"></param>
+
+        float* getChannelData(int nChannel) override
+        {
+            return outputBuffer[nChannel];
+        }
+
+
+        /// <summary>
+        /// <para>Returns number of samples of the specified channel of the processed buffer.</para>
+        /// </summary>
+        /// <param name="bufferLength"></param>
+
+        int getNumSamples() override
+        {
+            return nrOfSamples;
         }
 
         /// <summary>
@@ -201,9 +226,14 @@ class PitchShifter : public AudioEffect
                         sampleRate                  { AGGREGATOR_SAMPLE_FREQ },
                         ** delayBuffer;
         
-        int             delayBufferWritePosition    { 0 },
-                        delayBufferSize,
-                        nrOfChannels;
+        int                         delayBufferWritePosition    { 0 },
+                                    delayBufferSize,
+                                    nrOfChannels,
+                                    nrOfSamples;
         
-        bool            pitchUporDown               { FALSE };
+        bool                        pitchUporDown               { FALSE };
+
+        float**                     delayBuffer;
+        float**                     outputBuffer;
+
 };
