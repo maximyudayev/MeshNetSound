@@ -30,8 +30,8 @@
 
 #include "AudioBuffer.h"
 #include "AudioEffect.h"
+#include "RingBufferChannel.h"
 
-UINT32* AudioBuffer::pNewChannelOffset{ NULL };
 UINT32* AudioBuffer::pGroupId{ NULL };
 UINT32 AudioBuffer::nNewInstance{ 0 };
 UINT32 AudioBuffer::nNewGroupId{ 0 };
@@ -51,10 +51,6 @@ AudioBuffer::AudioBuffer(std::string filename, UINT32 nMember)
     AudioBuffer::nNewInstance++;
 
     this->pResampler = new Resampler();
-
-    // Initialize read/write locks for ring buffer read and write offset
-    InitializeSRWLock(&this->srwWriteOffset);
-    InitializeSRWLock(&this->srwReadOffset);
 }
 
 AudioBuffer::~AudioBuffer()
@@ -108,6 +104,8 @@ AudioBuffer::~AudioBuffer()
         }
     }
 
+    free(this->tResampleFmt.pBuffer);
+
     delete this->pResampler;
 }
 
@@ -115,30 +113,23 @@ HRESULT AudioBuffer::CreateBufferGroup(UINT32* pGroup)
 {
     if (AudioBuffer::nGroups == 0)
     {
-        pNewChannelOffset   = (UINT32*)malloc(sizeof(UINT32));
         pGroupId            = (UINT32*)malloc(sizeof(UINT32));
         
-        if (pNewChannelOffset == NULL ||
-            pGroupId == NULL)
+        if (pGroupId == NULL)
             return ENOMEM;
     }
     else
     {
         // Resize array of new channel offsets
-        UINT32* dummyChannel    = (UINT32*)realloc(pNewChannelOffset, (AudioBuffer::nGroups + 1) * sizeof(UINT32));
         UINT32* dummyGroup      = (UINT32*)realloc(pGroupId, (AudioBuffer::nGroups + 1) * sizeof(UINT32));
         
-        if (dummyChannel != NULL &&
-            dummyGroup != NULL)
+        if (dummyGroup != NULL)
         {
-            pNewChannelOffset = dummyChannel;
             pGroupId = dummyGroup;
         }
         else
             return ENOMEM;
     }
-    // Set the channel offset of the new group to 0
-    pNewChannelOffset[AudioBuffer::nGroups] = 0;
 
     // Write the "GUID" of the group into the user variable
     *pGroup = AudioBuffer::nNewGroupId++;
@@ -164,7 +155,6 @@ HRESULT AudioBuffer::RemoveBufferGroup(UINT32 nGroup)
 {
     if (AudioBuffer::nGroups == 1)
     {
-        free(AudioBuffer::pNewChannelOffset);
         free(AudioBuffer::pGroupId);
         AudioBuffer::nNewGroupId = 0;
     }
@@ -180,13 +170,10 @@ HRESULT AudioBuffer::RemoveBufferGroup(UINT32 nGroup)
         }
 
         // Reduce heap space for the arrays
-        UINT32* dummyChannel = (UINT32*)realloc(pNewChannelOffset, (AudioBuffer::nGroups - 1) * sizeof(UINT32));
         UINT32* dummyGroup = (UINT32*)realloc(pGroupId, (AudioBuffer::nGroups - 1) * sizeof(UINT32));
 
-        if (dummyChannel != NULL &&
-            dummyGroup != NULL)
+        if (dummyGroup != NULL)
         {
-            pNewChannelOffset = dummyChannel;
             pGroupId = dummyGroup;
         }
         else
@@ -195,6 +182,22 @@ HRESULT AudioBuffer::RemoveBufferGroup(UINT32 nGroup)
 
     AudioBuffer::nGroups--;
 
+    return ERROR_SUCCESS;
+}
+
+UINT32 AudioBuffer::GetChannelNumber()
+{
+    return this->tEndpointFmt.nChannels;
+}
+
+RingBufferChannel** AudioBuffer::GetRingBufferChannel()
+{
+    return this->tResampleFmt.pBuffer;
+}
+
+HRESULT AudioBuffer::SetRingBufferChannel(RingBufferChannel** pChannelArray)
+{
+    this->tResampleFmt.pBuffer = pChannelArray;
     return ERROR_SUCCESS;
 }
 
@@ -228,15 +231,13 @@ HRESULT AudioBuffer::SetFormat(WAVEFORMATEX* pwfx)
     return ERROR_SUCCESS;
 }
 
-HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBuffer,
+HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, RingBufferChannel** pCircularBuffer,
     UINT32* nCircularBufferSize, DWORD nUpsample, DWORD nDownsample)
 {
     this->tEndpointFmt.nBufferSize = nEndpointBufferSize;
 
     this->tResampleFmt.pBuffer = pCircularBuffer;
     this->tResampleFmt.nBufferSize = nCircularBufferSize;
-    this->tResampleFmt.nWriteOffset = 0;
-    this->tResampleFmt.nReadOffset = 0;
     this->tResampleFmt.nUpsample = nUpsample;
     this->tResampleFmt.nDownsample = nDownsample;
     this->tResampleFmt.fFactor = (FLOAT)nUpsample / (FLOAT)nDownsample;
@@ -254,10 +255,6 @@ HRESULT AudioBuffer::InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBu
                 << std::endl;
 
     UINT32 id = AudioBuffer::GetBufferGroupIndex(this->nMemberId);
-    // Indicate to this AudioBuffer instance its absolute buffer channel position
-    this->nChannelOffset = AudioBuffer::pNewChannelOffset[id];
-    // Update the new channel position for the next Class member
-    AudioBuffer::pNewChannelOffset[id] += this->tEndpointFmt.nChannels;
 
     return ERROR_SUCCESS;
 }
@@ -351,23 +348,23 @@ HRESULT AudioBuffer::PullData(BYTE* pData)
     // Modulo operator allows to go in circular fashion so no code duplication is required
     
     // Approximate new buffer offset after SRC and moving into ring buffer
-    UINT32 nNewWriteOffsetDummy = (this->tResampleFmt.nWriteOffset + (UINT32)ceil(*this->tEndpointFmt.nBufferSize * this->tResampleFmt.fFactor)) % *this->tResampleFmt.nBufferSize;
+    UINT32 nNewWriteOffsetDummy = (this->tResampleFmt.pBuffer[0]->GetWriteOffset() + (UINT32)ceil(*this->tEndpointFmt.nBufferSize * this->tResampleFmt.fFactor)) % *this->tResampleFmt.nBufferSize;
     // If writing the new packet will overwrite unread samples, keep exclusive lock of read offset
     // to prevent scenario of copying overwritten data mixed together with old and possibly messing offsets
-    AcquireSRWLockExclusive(&this->srwReadOffset); 
-    AcquireSRWLockExclusive(&this->srwWriteAheadReadByLap);
-    if (((nNewWriteOffsetDummy > this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && nNewWriteOffsetDummy == this->tResampleFmt.nReadOffset)) &&
-        this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset &&
-        this->tResampleFmt.nWriteOffset < nNewWriteOffsetDummy) ||
-        ((nNewWriteOffsetDummy < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && nNewWriteOffsetDummy == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset < this->tResampleFmt.nReadOffset &&
-            this->tResampleFmt.nWriteOffset < nNewWriteOffsetDummy) ||
-        ((nNewWriteOffsetDummy < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && nNewWriteOffsetDummy == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset))
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock()); 
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
+    if (((nNewWriteOffsetDummy > this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && nNewWriteOffsetDummy == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < nNewWriteOffsetDummy) ||
+        ((nNewWriteOffsetDummy < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && nNewWriteOffsetDummy == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < nNewWriteOffsetDummy) ||
+        ((nNewWriteOffsetDummy < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && nNewWriteOffsetDummy == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset()))
         bReadOffsetLock = TRUE;
     else
     {
-        ReleaseSRWLockExclusive(&this->srwReadOffset);
+        ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
     }
 
     // When user calls AudioBuffer::PullData with pData = NULL, AUDCLNT_BUFFERFLAGS_SILENT flag is set
@@ -386,10 +383,9 @@ HRESULT AudioBuffer::PullData(BYTE* pData)
             // Sample rate convert the packet and place in circular buffer
             nSamplesWritten = this->pResampler->Resample(
                 this->tResampleFmt, 
-                this->tEndpointFmt, 
-                this->nChannelOffset, 
+                this->tEndpointFmt,
                 &pData, 
-                (BYTE**)this->tResampleFmt.pBuffer,
+                (void*)this->tResampleFmt.pBuffer,
                 0,
                 TRUE);
 
@@ -399,9 +395,9 @@ HRESULT AudioBuffer::PullData(BYTE* pData)
                 for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
                 {
                     // If data was filled at most up to the end of memory allocated for ring buffer
-                    if (this->tResampleFmt.nWriteOffset + nSamplesWritten <= *(this->tResampleFmt.nBufferSize))
+                    if (this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten <= *(this->tResampleFmt.nBufferSize))
                         // Write to file data from ring buffer from the previous offset up till the number of resampled frames
-                        fwrite(this->tResampleFmt.pBuffer[this->nChannelOffset + i] + this->tResampleFmt.nWriteOffset,
+                        fwrite(this->tResampleFmt.pBuffer[i]->GetBufferPointer() + this->tResampleFmt.pBuffer[i]->GetWriteOffset(),
                             sizeof(FLOAT),
                             nSamplesWritten,
                             this->fResampledOutputFiles[i]);
@@ -409,15 +405,15 @@ HRESULT AudioBuffer::PullData(BYTE* pData)
                     else
                     {
                         // Write data to file from ring buffer's offset up till the end of the ring buffer
-                        fwrite(this->tResampleFmt.pBuffer[this->nChannelOffset + i] + this->tResampleFmt.nWriteOffset,
+                        fwrite(this->tResampleFmt.pBuffer[i]->GetBufferPointer() + this->tResampleFmt.pBuffer[i]->GetWriteOffset(),
                             sizeof(FLOAT),
-                            *this->tResampleFmt.nBufferSize - this->tResampleFmt.nWriteOffset,
+                            *this->tResampleFmt.nBufferSize - this->tResampleFmt.pBuffer[i]->GetWriteOffset(),
                             this->fResampledOutputFiles[i]);
 
                         // Write data to file from ring buffer's beginnig up till the remaining number of resampled frames
-                        fwrite(this->tResampleFmt.pBuffer[this->nChannelOffset + i],
+                        fwrite(this->tResampleFmt.pBuffer[i]->GetBufferPointer(),
                             sizeof(FLOAT),
-                            (this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize,
+                            (this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize,
                             this->fResampledOutputFiles[i]);
                     }
                 }
@@ -429,7 +425,7 @@ HRESULT AudioBuffer::PullData(BYTE* pData)
             pDataDummy = pData;
             for (UINT32 j = 0; j < *this->tEndpointFmt.nBufferSize; j++, pDataDummy += this->tEndpointFmt.nBlockAlign)
                 for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
-                    *(this->tResampleFmt.pBuffer[this->nChannelOffset + i] + (this->tResampleFmt.nWriteOffset + j) % *this->tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
+                    *(this->tResampleFmt.pBuffer[i]->GetBufferPointer() + (this->tResampleFmt.pBuffer[i]->GetWriteOffset() + j) % *this->tResampleFmt.nBufferSize) = *(((FLOAT*)pData) + i);
         }
     }
     else
@@ -438,40 +434,42 @@ HRESULT AudioBuffer::PullData(BYTE* pData)
     }
 
     //-------------------- End --------------------//
-    UINT32 dummyW = this->tResampleFmt.nWriteOffset, dummyR = this->tResampleFmt.nReadOffset;
+    UINT32 dummyW = this->tResampleFmt.pBuffer[0]->GetWriteOffset(), dummyR = this->tResampleFmt.pBuffer[0]->GetReadOffset();
     // Update the offset to position after the last frame of the current chunk
-    this->tResampleFmt.nWriteOffset = (this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize;
+    for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
+        this->tResampleFmt.pBuffer[i]->SetWriteOffset((this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize);
 
     // If write offset exceeded read offset by a whole lap, update read offset to the position of write offset,
     // hence drop frames that were delayed and try to catch up from the new position
-    if (((dummyW > this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && dummyW == this->tResampleFmt.nReadOffset)) && 
-            this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset && 
-            this->tResampleFmt.nWriteOffset < dummyW) ||
-        ((dummyW < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && dummyW == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset < this->tResampleFmt.nReadOffset && 
-            this->tResampleFmt.nWriteOffset < dummyW) ||
-        ((dummyW < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && dummyW == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset))
+    if (((dummyW > this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && dummyW == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+        this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+        this->tResampleFmt.pBuffer[0]->GetWriteOffset() < dummyW) ||
+        ((dummyW < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && dummyW == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < dummyW) ||
+        ((dummyW < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && dummyW == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset()))
     {
         // Set read offset from the same point as the last non-overwritten sample
-        this->tResampleFmt.nReadOffset = this->tResampleFmt.nWriteOffset;
+        for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
+            this->tResampleFmt.pBuffer[i]->SetReadOffset(this->tResampleFmt.pBuffer[i]->GetWriteOffset());
     }
 
     // Write offset catching up on read offset from the left (lower array indices)
     // indicating that if both match and write offset increased, then read offset is 
     // about to read overwritten newest data - not good, jump to the oldest valid instead
-    this->bWriteAheadReadByLap = (
-        (this->tResampleFmt.nWriteOffset <= dummyR && dummyW > dummyR) ||
-        (this->tResampleFmt.nWriteOffset <= dummyR && dummyW < this->tResampleFmt.nWriteOffset)
+    this->tResampleFmt.pBuffer[0]->SetWriteAheadReadByLap(
+        (this->tResampleFmt.pBuffer[0]->GetWriteOffset() <= dummyR && dummyW > dummyR) ||
+        (this->tResampleFmt.pBuffer[0]->GetWriteOffset() <= dummyR && dummyW < this->tResampleFmt.pBuffer[0]->GetWriteOffset())
     );
 
-    ReleaseSRWLockExclusive(&this->srwWriteAheadReadByLap);
+    ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
     if (bReadOffsetLock)
     {
-        ReleaseSRWLockExclusive(&this->srwReadOffset);
+        ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
         bReadOffsetLock = FALSE;
     }
-
+    
     return ERROR_SUCCESS;
 }
 
@@ -481,18 +479,17 @@ HRESULT AudioBuffer::PushData(BYTE* pData, UINT32 nFrames)
 
     // Take write lock of read offset to prevent producer from overwriting
     // what consumer is processing while consumer already started
-    AcquireSRWLockExclusive(&this->srwReadOffset);
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
     // Perform resampling if resampling factor is other than 1
     if (this->tResampleFmt.fFactor != 1.0)
     {
         // Sample rate convert the packet and place in output device's buffer
         nSamplesRead = this->pResampler->Resample(
-            this->tResampleFmt, 
-            this->tEndpointFmt, 
-            this->nChannelOffset, 
-            (BYTE**)this->tResampleFmt.pBuffer,
+            this->tResampleFmt,
+            this->tEndpointFmt,
+            (void*)this->tResampleFmt.pBuffer,
             &pData,
-            nFrames, 
+            nFrames,
             FALSE);
     }
     else // If factor is 1, right data straight into the device's buffer
@@ -500,17 +497,18 @@ HRESULT AudioBuffer::PushData(BYTE* pData, UINT32 nFrames)
         // Push nFrames from the ring buffer into the endpoint buffer for playback
         for (UINT32 j = 0; j < nFrames; j++, pData += this->tEndpointFmt.nBlockAlign)
             for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
-                *(((FLOAT*)pData) + i) = *(this->tResampleFmt.pBuffer[this->nChannelOffset + i] + (this->tResampleFmt.nReadOffset + j) % *this->tResampleFmt.nBufferSize);
+                *(((FLOAT*)pData) + i) = *(this->tResampleFmt.pBuffer[i]->GetBufferPointer() + (this->tResampleFmt.pBuffer[i]->GetReadOffset() + j) % *this->tResampleFmt.nBufferSize);
     }
     // Update read pointer respecting the circular buffer traversal
-    this->tResampleFmt.nReadOffset = (this->tResampleFmt.nReadOffset + nSamplesRead) % *this->tResampleFmt.nBufferSize;
-    
-    // If read offset caught up on the write offset from the left, clear the boolean
-    AcquireSRWLockExclusive(&this->srwWriteAheadReadByLap);
-    this->bWriteAheadReadByLap = this->tResampleFmt.nReadOffset > this->tResampleFmt.nWriteOffset;
-    ReleaseSRWLockExclusive(&this->srwWriteAheadReadByLap);
+    for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
+        this->tResampleFmt.pBuffer[i]->SetReadOffset((this->tResampleFmt.pBuffer[i]->GetReadOffset() + nSamplesRead) % *this->tResampleFmt.nBufferSize);
 
-    ReleaseSRWLockExclusive(&this->srwReadOffset);
+    // If read offset caught up on the write offset from the left, clear the boolean
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
+    this->tResampleFmt.pBuffer[0]->SetWriteAheadReadByLap(this->tResampleFmt.pBuffer[0]->GetReadOffset() > this->tResampleFmt.pBuffer[0]->GetWriteOffset());
+    ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
+
+    ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
 
     return ERROR_SUCCESS;
 }
@@ -518,21 +516,21 @@ HRESULT AudioBuffer::PushData(BYTE* pData, UINT32 nFrames)
 HRESULT AudioBuffer::ReadNextPacket(AudioEffect* pEffect)
 {
     FLOAT** pData = (FLOAT**)malloc(this->tEndpointFmt.nChannels * sizeof(FLOAT*));
-    
+
     // Store channel pointers
     for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
-        pData[i] = this->tResampleFmt.pBuffer[this->nChannelOffset + i];
+        pData[i] = this->tResampleFmt.pBuffer[i]->GetBufferPointer();
 
     // Take write lock of read offset to prevent producer from overwriting
     // what consumer is processing while consumer already started
-    AcquireSRWLockExclusive(&this->srwReadOffset);
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
 
     // Get the number of frames available for reading at this instant
-    AcquireSRWLockShared(&this->srwWriteOffset);
-    UINT32 nFrames = (this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset) ?
-        (this->tResampleFmt.nWriteOffset - this->tResampleFmt.nReadOffset) :                                    // data to read is linear
-        (*this->tResampleFmt.nBufferSize - this->tResampleFmt.nReadOffset + this->tResampleFmt.nWriteOffset);   // data to read is circular
-    ReleaseSRWLockShared(&this->srwWriteOffset);
+    AcquireSRWLockShared(&this->tResampleFmt.pBuffer[0]->GetWriteOffsetSRWLock());
+    UINT32 nFrames = (this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset()) ?
+        (this->tResampleFmt.pBuffer[0]->GetWriteOffset() - this->tResampleFmt.pBuffer[0]->GetReadOffset()) :                                    // data to read is linear
+        (*this->tResampleFmt.nBufferSize - this->tResampleFmt.pBuffer[0]->GetReadOffset() + this->tResampleFmt.pBuffer[0]->GetWriteOffset());   // data to read is circular
+    ReleaseSRWLockShared(&this->tResampleFmt.pBuffer[0]->GetWriteOffsetSRWLock());
 
     // Feed data to the calling audio effect thread into the provided callback
     DSPPACKET iDSPPacket = {
@@ -541,16 +539,17 @@ HRESULT AudioBuffer::ReadNextPacket(AudioEffect* pEffect)
         pData
     };
     pEffect->process(&iDSPPacket);
-    
+
     // Update read pointer respecting the circular buffer traversal
-    this->tResampleFmt.nReadOffset = (this->tResampleFmt.nReadOffset + nFrames) % *this->tResampleFmt.nBufferSize;
+    for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
+        this->tResampleFmt.pBuffer[i]->SetReadOffset((this->tResampleFmt.pBuffer[i]->GetReadOffset() + nFrames) % *this->tResampleFmt.nBufferSize);
 
     // If read offset caught up on the write offset from the left, clear the boolean
-    AcquireSRWLockExclusive(&this->srwWriteAheadReadByLap);
-    this->bWriteAheadReadByLap = this->tResampleFmt.nReadOffset > this->tResampleFmt.nWriteOffset;
-    ReleaseSRWLockExclusive(&this->srwWriteAheadReadByLap);
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
+    this->tResampleFmt.pBuffer[0]->SetWriteAheadReadByLap(this->tResampleFmt.pBuffer[0]->GetReadOffset() > this->tResampleFmt.pBuffer[0]->GetWriteOffset());
+    ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
 
-    ReleaseSRWLockExclusive(&this->srwReadOffset);
+    ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
 
     free(pData);
 
@@ -561,39 +560,39 @@ HRESULT AudioBuffer::WriteNextPacket(AudioEffect* pEffect)
 {
     UINT32 nSamplesWritten = pEffect->getNumSamples();
     BOOL bReadOffsetLock = FALSE;
-    
+
     // Modulo operator allows to go in circular fashion so no code duplication is required
-    
+
     // Approximate new buffer offset after SRC and moving into ring buffer
-    UINT32 nNewWriteOffsetDummy = (this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize;
+    UINT32 nNewWriteOffsetDummy = (this->tResampleFmt.pBuffer[0]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize;
     // If writing the new packet will overwrite unread samples, keep exclusive lock of read offset
     // to prevent scenario of copying overwritten data mixed together with old and possibly messing offsets
-    AcquireSRWLockExclusive(&this->srwReadOffset);
-    AcquireSRWLockExclusive(&this->srwWriteAheadReadByLap);
-    if (((nNewWriteOffsetDummy > this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && nNewWriteOffsetDummy == this->tResampleFmt.nReadOffset)) &&
-        this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset &&
-        this->tResampleFmt.nWriteOffset < nNewWriteOffsetDummy) ||
-        ((nNewWriteOffsetDummy < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && nNewWriteOffsetDummy == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset < this->tResampleFmt.nReadOffset &&
-            this->tResampleFmt.nWriteOffset < nNewWriteOffsetDummy) ||
-        ((nNewWriteOffsetDummy < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && nNewWriteOffsetDummy == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset))
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
+    AcquireSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
+    if (((nNewWriteOffsetDummy > this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && nNewWriteOffsetDummy == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+        this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+        this->tResampleFmt.pBuffer[0]->GetWriteOffset() < nNewWriteOffsetDummy) ||
+        ((nNewWriteOffsetDummy < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && nNewWriteOffsetDummy == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < nNewWriteOffsetDummy) ||
+        ((nNewWriteOffsetDummy < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && nNewWriteOffsetDummy == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset()))
         bReadOffsetLock = TRUE;
     else
     {
-        ReleaseSRWLockExclusive(&this->srwReadOffset);
+        ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
     }
-    
+
     // Output DSP'ed data into the output ring buffer
     for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
     {
         // Get pointer to the processed data buffer
         FLOAT* pData = pEffect->getChannelData(i);
-        
-        if ((this->tResampleFmt.nWriteOffset + nSamplesWritten) < *this->tResampleFmt.nBufferSize)
+
+        if ((this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) < *this->tResampleFmt.nBufferSize)
         {
             // If moving data does not result in circular traversal of ring buffer, copy data directly in chunk
-            memcpy(this->tResampleFmt.pBuffer[this->nChannelOffset + i] + this->tResampleFmt.nWriteOffset,
+            memcpy(this->tResampleFmt.pBuffer[i]->GetBufferPointer() + this->tResampleFmt.pBuffer[i]->GetWriteOffset(),
                 pData,
                 sizeof(FLOAT) * nSamplesWritten);
         }
@@ -601,50 +600,52 @@ HRESULT AudioBuffer::WriteNextPacket(AudioEffect* pEffect)
         {
             // If moving data will result in circular traversal of ring buffer,
             // first copy only the data up till the end of ring buffer
-            memcpy(this->tResampleFmt.pBuffer[this->nChannelOffset + i] + this->tResampleFmt.nWriteOffset,
+            memcpy(this->tResampleFmt.pBuffer[i]->GetBufferPointer() + this->tResampleFmt.pBuffer[i]->GetWriteOffset(),
                 pData,
-                sizeof(FLOAT) * (nSamplesWritten - ((this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize)));
-            
+                sizeof(FLOAT) * (nSamplesWritten - ((this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize)));
+
             // Then copy the rest into the beginning of the ring buffer, 
             // don't forget to offset into the source buffer by the number of samples written previously
-            memcpy(this->tResampleFmt.pBuffer[this->nChannelOffset + i],
-                pData + (nSamplesWritten - ((this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize)),
-                sizeof(FLOAT) * ((this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize));
+            memcpy(this->tResampleFmt.pBuffer[i]->GetBufferPointer(),
+                pData + (nSamplesWritten - ((this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize)),
+                sizeof(FLOAT) * ((this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize));
         }
     }
 
     //-------------------- End --------------------//
-    UINT32 dummyW = this->tResampleFmt.nWriteOffset, dummyR = this->tResampleFmt.nReadOffset;
+    UINT32 dummyW = this->tResampleFmt.pBuffer[0]->GetWriteOffset(), dummyR = this->tResampleFmt.pBuffer[0]->GetReadOffset();
     // Update the offset to position after the last frame of the current chunk
-    this->tResampleFmt.nWriteOffset = (this->tResampleFmt.nWriteOffset + nSamplesWritten) % *this->tResampleFmt.nBufferSize;
+    for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
+        this->tResampleFmt.pBuffer[i]->SetWriteOffset((this->tResampleFmt.pBuffer[i]->GetWriteOffset() + nSamplesWritten) % *this->tResampleFmt.nBufferSize);
 
     // If write offset exceeded read offset by a whole lap, update read offset to the position of write offset,
     // hence drop frames that were delayed and try to catch up from the new position
-    if (((dummyW > this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && dummyW == this->tResampleFmt.nReadOffset)) && 
-            this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset && 
-            this->tResampleFmt.nWriteOffset < dummyW) ||
-        ((dummyW < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && dummyW == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset < this->tResampleFmt.nReadOffset && 
-            this->tResampleFmt.nWriteOffset < dummyW) ||
-        ((dummyW < this->tResampleFmt.nReadOffset || (this->bWriteAheadReadByLap && dummyW == this->tResampleFmt.nReadOffset)) &&
-            this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset))
+    if (((dummyW > this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && dummyW == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+        this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+        this->tResampleFmt.pBuffer[0]->GetWriteOffset() < dummyW) ||
+        ((dummyW < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && dummyW == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < this->tResampleFmt.pBuffer[0]->GetReadOffset() &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() < dummyW) ||
+        ((dummyW < this->tResampleFmt.pBuffer[0]->GetReadOffset() || (this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLap() && dummyW == this->tResampleFmt.pBuffer[0]->GetReadOffset())) &&
+            this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset()))
     {
         // Set read offset from the same point as the last non-overwritten sample
-        this->tResampleFmt.nReadOffset = this->tResampleFmt.nWriteOffset;
+        for (UINT32 i = 0; i < this->tEndpointFmt.nChannels; i++)
+            this->tResampleFmt.pBuffer[i]->SetReadOffset(this->tResampleFmt.pBuffer[i]->GetWriteOffset());
     }
 
     // Write offset catching up on read offset from the left (lower array indices)
     // indicating that if both match and write offset increased, then read offset is 
     // about to read overwritten newest data - not good, jump to the oldest valid instead
-    this->bWriteAheadReadByLap = (
-        (this->tResampleFmt.nWriteOffset <= dummyR && dummyW > dummyR) ||
-        (this->tResampleFmt.nWriteOffset <= dummyR && dummyW < this->tResampleFmt.nWriteOffset)
+    this->tResampleFmt.pBuffer[0]->SetWriteAheadReadByLap(
+        (this->tResampleFmt.pBuffer[0]->GetWriteOffset() <= dummyR && dummyW > dummyR) ||
+        (this->tResampleFmt.pBuffer[0]->GetWriteOffset() <= dummyR && dummyW < this->tResampleFmt.pBuffer[0]->GetWriteOffset())
     );
 
-    ReleaseSRWLockExclusive(&this->srwWriteAheadReadByLap);
+    ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetWriteAheadReadByLapSRWLock());
     if (bReadOffsetLock)
     {
-        ReleaseSRWLockExclusive(&this->srwReadOffset);
+        ReleaseSRWLockExclusive(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
         bReadOffsetLock = FALSE;
     }
 
@@ -652,17 +653,17 @@ HRESULT AudioBuffer::WriteNextPacket(AudioEffect* pEffect)
 }
 
 UINT32 AudioBuffer::FramesAvailable()
-{   
+{
     // Potentially better to deal with locks in calling functions to avoid invalidation of the number of available frames
-    AcquireSRWLockShared(&this->srwReadOffset);
-    AcquireSRWLockShared(&this->srwWriteOffset);
+    AcquireSRWLockShared(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
+    AcquireSRWLockShared(&this->tResampleFmt.pBuffer[0]->GetWriteOffsetSRWLock());
 
-    UINT32 nFrames = (this->tResampleFmt.nWriteOffset > this->tResampleFmt.nReadOffset) ?
-        (this->tResampleFmt.nWriteOffset - this->tResampleFmt.nReadOffset) :                                    // data to read is linear
-        (*this->tResampleFmt.nBufferSize - this->tResampleFmt.nReadOffset + this->tResampleFmt.nWriteOffset);   // data to read is circular
-    
-    ReleaseSRWLockShared(&this->srwReadOffset);
-    ReleaseSRWLockShared(&this->srwWriteOffset);
+    UINT32 nFrames = (this->tResampleFmt.pBuffer[0]->GetWriteOffset() > this->tResampleFmt.pBuffer[0]->GetReadOffset()) ?
+        (this->tResampleFmt.pBuffer[0]->GetWriteOffset() - this->tResampleFmt.pBuffer[0]->GetReadOffset()) :                                    // data to read is linear
+        (*this->tResampleFmt.nBufferSize - this->tResampleFmt.pBuffer[0]->GetReadOffset() + this->tResampleFmt.pBuffer[0]->GetWriteOffset());   // data to read is circular
+
+    ReleaseSRWLockShared(&this->tResampleFmt.pBuffer[0]->GetReadOffsetSRWLock());
+    ReleaseSRWLockShared(&this->tResampleFmt.pBuffer[0]->GetWriteOffsetSRWLock());
     return nFrames;
 }
 

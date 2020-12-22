@@ -17,7 +17,6 @@ class Flanger : public AudioEffect
 			delayBufferSize = TRANSPOSITION * 2;
 
 			// allocate heap structure for delay buffer
-
 			delayBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
 			for (auto i = 0; i < nrOfChannels; i++)
 			{
@@ -25,7 +24,6 @@ class Flanger : public AudioEffect
 			}
 			
 			// allocate heap structure for feedback buffer (same size as delaybuffer)
-
 			feedbackBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
 			for (auto i = 0; i < nrOfChannels; i++)
 			{
@@ -39,7 +37,6 @@ class Flanger : public AudioEffect
 		~Flanger()
 		{
 			// free heap structure for delay buffer
-
 			for (int i = 0; i < nrOfChannels; i++)
 			{
 				float* currentIntPtr = delayBuffer[i];
@@ -51,8 +48,6 @@ class Flanger : public AudioEffect
 				float* currentIntPtr = feedbackBuffer[i];
 				free(currentIntPtr);
 			}
-
-
 		}
 
         /// <summary>
@@ -74,14 +69,11 @@ class Flanger : public AudioEffect
 			UINT32  nrOfChannels = inbuffer->nChannels;
 			UINT32  nrOfSamples = inbuffer->nSamples;
 			
-			
 			for (auto channel = 0; channel < nrOfChannels; ++channel)
-
 			{
 				fillDelaybuffer(nrOfSamples, channel, processBuffer[channel], 1.0);
 
 				for (auto sample = 0; sample < nrOfSamples; ++sample)
-
 				{
 					const float* delay = delayBuffer[channel];
 					const float* feedback = feedbackBuffer[channel];
@@ -99,7 +91,6 @@ class Flanger : public AudioEffect
 					feedbackBuffer[channel][feedbackBufferWritePosition + sample] = output;
 						
 					processBuffer[sample][channel] = output;
-
 				}
 			}
         }
@@ -116,39 +107,29 @@ class Flanger : public AudioEffect
 		/// <param name="gain"></param>
 		void fillDelaybuffer(const int bufferLength, int channel, float* bufferData, const float gain)
 		{
-
 			if (delayBufferSize > bufferLength + delayBufferWritePosition)
-
 			{
 				// Copy data from main input ring buffer chunk into delay buffer
-
 				for (auto sample = 0; sample < bufferLength; sample++)
 				{
 					delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
 				}
-
 			}
-
 			else
 			{
-
 				const int delayBufferRemaining = delayBufferSize - delayBufferWritePosition;
 
 				// Copy data from main input ring buffer chunk that still fits into delay buffer
-
 				for (auto sample = 0; sample < delayBufferRemaining; sample++)
 				{
 					delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
 				}
 
 				// Copy the rest of the data from main input ring buffer chunk into delay buffer
-
 				for (auto sample = 0; sample < delayBufferRemaining; sample++)
 				{
 					delayBuffer[channel][sample] = gain * bufferData[delayBufferRemaining + sample];
 				}
-
-
 			}
 		}
 
@@ -217,17 +198,16 @@ class Flanger : public AudioEffect
 		}
 
 	private:
-		float						sinePhase[2]				{ 0.0, 0.0 },
-									sinefrequency				{ 0.0 },
-									flangerDepth				{ 0.0 },
-									feedbackLevel				{ 0.0 },		// should ALWAYS be lower than 1 !!
-									sampleRate					{ 44100 };
+		float		sinePhase[2]				{ 0.0, 0.0 },
+					sinefrequency				{ 0.0 },
+					flangerDepth				{ 0.0 },
+					feedbackLevel				{ 0.0 },		// should ALWAYS be lower than 1 !!
+					sampleRate					{ AGGREGATOR_SAMPLE_FREQ },
+					** delayBuffer,
+					** feedbackBuffer;
 		
-		int							delayBufferWritePosition	{ 0 }, 
-									feedbackBufferWritePosition { 0 }, 
-									nrOfChannels, 
-									delayBufferSize;
-
-		float**						delayBuffer;
-		float**						feedbackBuffer;
+		int			delayBufferWritePosition	{ 0 }, 
+					feedbackBufferWritePosition { 0 }, 
+					nrOfChannels, 
+					delayBufferSize;
 };

@@ -142,6 +142,7 @@
     <ClCompile Include="AudioBuffer.cpp" />
     <ClCompile Include="Aggregator.cpp" />
     <ClCompile Include="Resampler.cpp" />
+    <ClCompile Include="RingBufferChannel.cpp" />
     <ClCompile Include="UDP.cpp" />
     <ClCompile Include="UDPAudioBuffer.cpp" />
   </ItemGroup>
@@ -153,6 +154,7 @@
     <ClInclude Include="Flanger.h" />
     <ClInclude Include="PitchShifter.h" />
     <ClInclude Include="Resampler.h" />
+    <ClInclude Include="RingBufferChannel.h" />
     <ClInclude Include="UDP.h" />
     <ClInclude Include="UDPAudioBuffer.h" />
   </ItemGroup>

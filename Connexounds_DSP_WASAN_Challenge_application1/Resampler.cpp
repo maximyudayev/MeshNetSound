@@ -14,6 +14,8 @@
 */
 
 #include "Resampler.h"
+#include "RingBufferChannel.h"
+
 /*
  * reference: "Digital Filters, 2nd edition"
  *            R.W. Hamming, pp. 178-179
@@ -124,7 +126,7 @@ void Resampler::SetLPScaling(FLOAT fFactor)
         this->fLPScale = 1.0;
 }
 
-UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt, UINT32 nChannelOffset, BYTE** pDataSrc, BYTE** pDataDst, UINT32 nFramesLimit, BOOL bIn)
+UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt, void* pDataSrc, void* pDataDst, UINT32 nFramesLimit, BOOL bIn)
 {
     DOUBLE dh = tResamplerParams.nNl;               // Step size through the filter table
     DOUBLE dt = 1.0 / tResampleFmt.fFactor;         // Output sampling period
@@ -132,7 +134,7 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
     DOUBLE fCurrentTime = 0;
     UINT32 nFramesWritten = 0;
     BOOLEAN bInterpolate = TRUE, bRight = FALSE;    // Flag indicating interpolation
-    
+
     // If rational conversion factor is used, such that rho = L/M,
     // where L is number of filter samples between each zero-crossing
     // and M is an arbitrary integer, no interpolation is required
@@ -145,8 +147,8 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
     if (tResampleFmt.fFactor > 1.0)
     {
         // Specify the range of input samples to use for MAC, only 0th channel is enough
-        FLOAT* XStart = bIn ? (FLOAT*)*pDataSrc - tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] - 1;
-        FLOAT* XEnd = bIn ? (FLOAT*)*pDataSrc + *tEndpointFmt.nBufferSize * (UINT64)tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] + *tEndpointFmt.nBufferSize;
+        FLOAT* XStart = bIn ? *(FLOAT**)pDataSrc - tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() - 1;
+        FLOAT* XEnd = bIn ? *(FLOAT**)pDataSrc + *tEndpointFmt.nBufferSize * (UINT64)tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() + *tEndpointFmt.nBufferSize;
 
         // Perform linear convolution on the endpoint buffer
         // store result immediately into ring buffer
@@ -155,20 +157,20 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
             FLOAT* Hp, * Hdp, * HEnd, v = 0, dummy;
 
             // Get the input sample using the integer part of the fCurrentTime float as index
-            FLOAT* X = bIn ? (FLOAT*)*pDataSrc + ((UINT32)fCurrentTime) * (UINT64)tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] + ((UINT32)fCurrentTime);
+            FLOAT* X = bIn ? *(FLOAT**)pDataSrc + ((UINT32)fCurrentTime) * (UINT64)tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() + ((UINT32)fCurrentTime);
             // Create relative index to sweep across samples for the case of bIn = FALSE -> SRC out of ring buffer
             INT32 nX = 0;
 
             // Make note of the next cell's offset to reduce computational cost
-            UINT32 position = (tResampleFmt.nWriteOffset + nFramesWritten) % *tResampleFmt.nBufferSize;
+            UINT32 position = (tResampleFmt.pBuffer[0]->GetWriteOffset() + nFramesWritten) % *tResampleFmt.nBufferSize;
 
             // Clear current ring buffer pointed cell for each channel
             for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
             {
                 if (bIn)    // SRC of captured data into ring buffer
-                    *(tResampleFmt.pBuffer[nChannelOffset + i] + position) = 0;
+                    *(((RingBufferChannel**)pDataDst)[i]->GetBufferPointer() + position) = 0;
                 else        // SRC of processed data out of ring buffer
-                    *((FLOAT*)(*pDataDst + nFramesWritten * (UINT64)tEndpointFmt.nChannels + i)) = 0;
+                    *(*((FLOAT**)pDataDst) + nFramesWritten * (UINT64)tEndpointFmt.nChannels + i) = 0;
             }
 
             // Compute distance between current time and nearby input samples in relative units of input
@@ -213,7 +215,7 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                             FLOAT temp = dummy * *(X + i);
 
                             // Write results to each corresponding channel in the ring buffer
-                            *(tResampleFmt.pBuffer[nChannelOffset + i] + position) += temp;
+                            *(((RingBufferChannel**)pDataDst)[i]->GetBufferPointer() + position) += temp;
                         }
                         X += (bRight) ? tEndpointFmt.nChannels : -tEndpointFmt.nChannels;   // Decrements endpoint buffer pointer in left wing, 
                                                                                             // increments in right wing
@@ -225,10 +227,10 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                         for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
                         {
                             // Multiply (interpolated) filter coefficient with each of interleaved audio channel samples
-                            FLOAT temp = dummy * *((FLOAT*)pDataSrc[nChannelOffset + i] + ((UINT32)fCurrentTime) + nX);
+                            FLOAT temp = dummy * *(((RingBufferChannel**)pDataSrc)[i]->GetBufferPointer() + ((UINT32)fCurrentTime) + nX);
 
                             // Write results interleaved in the device's render linear buffer
-                            *((FLOAT*)(*pDataDst + ((UINT32)fCurrentTime) + i)) += temp;
+                            *((*((FLOAT**)pDataDst) + ((UINT32)fCurrentTime) + i)) += temp;
                         }
                         nX += (bRight) ? 1 : -1;    // Decrements endpoint buffer pointer in left wing, 
                                                     // increments in right wing
@@ -238,7 +240,7 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                 bRight = TRUE; 
                 Ph = fRightPhase;
                 // Update to n+1 input sample prior to filtering the right wing
-                X = bIn ? (FLOAT*)*pDataSrc + (((UINT64)fCurrentTime) + 1) * (UINT64)tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] + ((UINT32)fCurrentTime) + 1;
+                X = bIn ? *(FLOAT**)pDataSrc + (((UINT64)fCurrentTime) + 1) * (UINT64)tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() + ((UINT32)fCurrentTime) + 1;
                 nX = 1;
             }
             // Increment the number of resampled frames and the time register
@@ -251,8 +253,8 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
         dh *= tResampleFmt.fFactor;
         
         // Specify the range of input samples to use for MAC, only 0th channel is enough
-        FLOAT* XStart = bIn ? (FLOAT*)*pDataSrc - tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] - 1;
-        FLOAT* XEnd = bIn ? (FLOAT*)*pDataSrc + *tEndpointFmt.nBufferSize * (UINT64)tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] + *tEndpointFmt.nBufferSize;
+        FLOAT* XStart = bIn ? *(FLOAT**)pDataSrc - tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() - 1;
+        FLOAT* XEnd = bIn ? *(FLOAT**)pDataSrc + *tEndpointFmt.nBufferSize * (UINT64)tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() + *tEndpointFmt.nBufferSize;
 
         // Perform linear convolution on the endpoint buffer
         // store result immediately into ring buffer
@@ -261,20 +263,20 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
             FLOAT* Hp, * Hdp, * HEnd, v = 0, dummy;
 
             // Get the input sample using the integer part of the fCurrentTime float as index
-            FLOAT* X = bIn ? (FLOAT*)*pDataSrc + ((UINT32)fCurrentTime) * (UINT64)tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] + ((UINT32)fCurrentTime);
+            FLOAT* X = bIn ? *(FLOAT**)pDataSrc + ((UINT32)fCurrentTime) * (UINT64)tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() + ((UINT32)fCurrentTime);
             // Create relative index to sweep across samples for the case of bIn = FALSE -> SRC out of ring buffer
             INT32 nX = 0;
 
             // Make note of the next cell's offset to reduce computational cost
-            UINT32 position = (tResampleFmt.nWriteOffset + nFramesWritten) % *tResampleFmt.nBufferSize;
+            UINT32 position = (((RingBufferChannel**)pDataDst)[0]->GetWriteOffset() + nFramesWritten) % *tResampleFmt.nBufferSize;
 
             // Clear current ring buffer pointed cell for each channel
             for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
             {
                 if (bIn)    // SRC of captured data into ring buffer
-                    *(tResampleFmt.pBuffer[nChannelOffset + i] + position) = 0;
+                    *(tResampleFmt.pBuffer[i]->GetBufferPointer() + position) = 0;
                 else        // SRC of processed data out of ring buffer
-                    *((FLOAT*)(*pDataDst + nFramesWritten * (UINT64)tEndpointFmt.nChannels + i)) = 0;
+                    *(*((FLOAT**)pDataDst) + nFramesWritten * (UINT64)tEndpointFmt.nChannels + i) = 0;
             }
 
             // Compute distance between current time and nearby input samples in relative units of input
@@ -316,10 +318,10 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                             FLOAT temp = dummy * *(X + i);
 
                             // Write results to each corresponding channel in the ring buffer
-                            *(tResampleFmt.pBuffer[nChannelOffset + i] + position) += temp;
+                            *(((RingBufferChannel**)pDataDst)[i]->GetBufferPointer() + position) += temp;
 
                             // Scale the output of the computd sample by 1/factor to account for unity gain
-                            *(tResampleFmt.pBuffer[nChannelOffset + i] + position) *= this->fLPScale;
+                            *(((RingBufferChannel**)pDataDst)[i]->GetBufferPointer() + position) *= this->fLPScale;
                         }
                         X += (bRight) ? tEndpointFmt.nChannels : -tEndpointFmt.nChannels;   // Decrements endpoint buffer pointer in left wing, 
                                                                                             // increments in right wing
@@ -331,13 +333,13 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                         for (UINT32 i = 0; i < tEndpointFmt.nChannels; i++)
                         {
                             // Multiply (interpolated) filter coefficient with each of interleaved audio channel samples
-                            FLOAT temp = dummy * *((FLOAT*)pDataSrc[nChannelOffset + i] + ((UINT32)fCurrentTime) + nX);
+                            FLOAT temp = dummy * *(((RingBufferChannel**)pDataSrc)[i]->GetBufferPointer() + ((UINT32)fCurrentTime) + nX);
                             
                             // Write results interleaved in the device's render linear buffer
-                            *((FLOAT*)(*pDataDst + ((UINT32)fCurrentTime) + i)) += temp;
+                            *((*((FLOAT**)pDataDst) + ((UINT32)fCurrentTime) + i)) += temp;
 
                             // Scale the output of the computd sample by 1/factor to account for unity gain
-                            *((FLOAT*)(*pDataDst + ((UINT32)fCurrentTime) + i)) *= this->fLPScale;
+                            *((*((FLOAT**)pDataDst) + ((UINT32)fCurrentTime) + i)) *= this->fLPScale;
                         }
                         nX += (bRight) ? 1 : -1;    // Decrements endpoint buffer pointer in left wing, 
                                                     // increments in right wing
@@ -348,7 +350,7 @@ UINT32 Resampler::Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt,
                 bRight = TRUE;
                 Ph = fRightPhase;
                 // Update to n+1 input sample prior to filtering the right wing
-                X = bIn ? (FLOAT*)*pDataSrc + (((UINT64)fCurrentTime) + 1) * (UINT64)tEndpointFmt.nChannels : (FLOAT*)pDataSrc[nChannelOffset] + ((UINT32)fCurrentTime) + 1;
+                X = bIn ? *(FLOAT**)pDataSrc + (((UINT64)fCurrentTime) + 1) * (UINT64)tEndpointFmt.nChannels : ((RingBufferChannel**)pDataSrc)[0]->GetBufferPointer() + ((UINT32)fCurrentTime) + 1;
                 nX = 1;
             }
             // Increment the number of resampled frames and the time register

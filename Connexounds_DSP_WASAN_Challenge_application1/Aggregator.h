@@ -10,12 +10,12 @@
 #include <audiopolicy.h>
 
 #include "config.h"
+#include "RingBufferChannel.h"
 #include "AudioBuffer.h"
 #include "UDPAudioBuffer.h"
 #include "Resampler.h"
 #include "AudioEffect.h"
 #include "config.h"
-
 
 typedef struct UDPCaptureThreadParam {
 	CHAR* sUDPServerIP;
@@ -47,6 +47,19 @@ typedef struct RenderThreadParam {
 	UINT32 nWASANNodes;
 } RENDERTHREADPARAM;
 
+typedef struct DSPThreadParam {
+	BOOL* bDone;
+	UINT32 nDevices;
+	AudioBuffer** pAudioBuffer[2];
+} DSPTHREADPARAM;
+
+typedef struct AudioEffectThreadParam {
+	BOOL* bDone;
+	UINT32 nChannels[2];
+	AudioBuffer* pAudioBuffer[2];
+	AudioEffect* pEffect;
+} AUDIOEFFECTTHREADPARAM;
+
 /// <summary>
 /// <para>Runs UDP server listener thread.</para>
 /// </summary>
@@ -75,10 +88,15 @@ DWORD WINAPI RenderThread(LPVOID lpParam);
 /// functionality for audio effect object manipulation.</para>
 /// </summary>
 /// <param name="lpParam"></param>
-
-
 /// <returns></returns>
 DWORD WINAPI DSPThread(LPVOID lpParam);
+
+/// <summary>
+/// 
+/// </summary>
+/// <param name="lpParam"></param>
+/// <returns></returns>
+DWORD WINAPI AudioEffectThread(LPVOID lpParam);
 
 /// <summary>
 /// Class presenting top-level API to the caller that arranges all the configuration
@@ -218,7 +236,7 @@ class Aggregator
 
 		Resampler				** pResampler			{ NULL };
 
-		FLOAT					** pCircularBuffer[2]	{ NULL }; 
+		RingBufferChannel		** pRingBuffer[2]		{ NULL };
 
 		BOOL					bDone[2]				{ FALSE, FALSE };
 

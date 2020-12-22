@@ -12,8 +12,6 @@
 #include "Resampler.h"
 #include "AudioEffect.h"
 
-
-
 /// <summary>
 /// Class representing a distinct physical or virtual device with associated ring buffer space,
 /// sample rate conversion details, and auxillary data required for getting data into the 
@@ -95,7 +93,7 @@ class AudioBuffer
 		/// <returns>
 		/// ERROR_SUCCESS if buffer set up succeeded.
 		/// </returns>
-		HRESULT InitBuffer(UINT32* nEndpointBufferSize, FLOAT** pCircularBuffer, 
+		HRESULT InitBuffer(UINT32* nEndpointBufferSize, RingBufferChannel** pCircularBuffer,
 							UINT32* nCircularBufferSize, DWORD nUpsample, DWORD nDownsample);
 		
 		/// <summary>
@@ -172,6 +170,12 @@ class AudioBuffer
 		/// </summary>
 		/// <returns>Least number of frames needed for safe SRC for this device.</returns>
 		UINT32 GetMinFramesOut();
+
+		UINT32 GetChannelNumber();
+
+		RingBufferChannel** GetRingBufferChannel();
+
+		HRESULT SetRingBufferChannel(RingBufferChannel** pChannelArray);
 		
 	protected:
 		/// <summary>
@@ -194,17 +198,10 @@ class AudioBuffer
 		// Circular buffer related variables
 		Resampler			* pResampler;
 		RESAMPLEFMT			tResampleFmt;
-		UINT32				nChannelOffset,					// Index of the device's 1st channel in the aggregated ring buffer		
-							nTimeAlignOffset				{ 0 },
+		UINT32				nTimeAlignOffset				{ 0 },
 							nMinFramesOut					{ 0 };		// Indicator for output ring buffer when safe to SRC for output
 																		// to avoid coming short on samples
-		BOOL				bWriteAheadReadByLap			{ FALSE };
-		SRWLOCK				srwWriteOffset,					// R/W Locks protect buffer offset variables from being overwritten by 
-							srwReadOffset,					// a producer thread while a consumer thread uses them.
-							srwWriteAheadReadByLap;			// Ensures that ring buffer samples of a corresponding device can be
-															// overwritten (in case consumer is slower than producer, i.e DSP vs. capture)
-															// only when no consumer thread is in the process of reading data 
-															// from the ring buffer.
+		
 		// Endpoint buffer related variables
 		ENDPOINTFMT			tEndpointFmt;
 
@@ -215,8 +212,6 @@ class AudioBuffer
 		static UINT32		nNewGroupId;					// Auto-incremented "GUID" of the AudioBuffer group
 		static UINT32		* pGroupId;						// Array of AudioBuffer group indices
 		
-		static UINT32		* pNewChannelOffset;			// Array of indices of the 1st channel location in the aggregated
-															// ring buffer for the next future inserted AudioBuffer instance
 		UINT32				nInstance;						// Device's "GUID"
 		static UINT32		nNewInstance;					// "GUID" of the next AudioBuffer
 };

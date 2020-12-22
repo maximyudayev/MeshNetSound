@@ -24,9 +24,7 @@ typedef struct endpointfmt {
 } ENDPOINTFMT;
 
 typedef struct resamplefmt {
-	FLOAT** pBuffer;
-	UINT32 nWriteOffset;
-	UINT32 nReadOffset;
+	RingBufferChannel** pBuffer;
 	UINT32* nBufferSize;
 	DWORD nUpsample;
 	DWORD nDownsample;
@@ -112,7 +110,7 @@ class Resampler
 		/// <param name="bIn">- indicator if pDataSrc is a pointer to a capture buffer (moving captured data into ring buffer) 
 		/// or to a ring buffer (moving processed data out of ring buffer into linear render buffer).</param>
 		/// <returns>Returns the number of resampled values written to the buffer.</returns>		
-		UINT32 Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt, UINT32 nChannelOffset, BYTE** pDataSrc, BYTE** pDataDst, UINT32 nFramesLimit, BOOL bIn);
+		UINT32 Resample(RESAMPLEFMT& tResampleFmt, ENDPOINTFMT& tEndpointFmt, void* pDataSrc, void* pDataDst, UINT32 nFramesLimit, BOOL bIn);
 
 	private:
 		/// <summary>

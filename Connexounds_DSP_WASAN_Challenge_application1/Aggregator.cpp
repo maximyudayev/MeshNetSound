@@ -57,13 +57,12 @@ Aggregator::~Aggregator()
         AudioBuffer::RemoveBufferGroup(pAudioBufferGroupId[j]);
 
         // Release memory alloc'ed for ring buffer
-        if (pCircularBuffer[j] != NULL)
+        if (pRingBuffer[j] != NULL)
         {
             for (UINT32 i = 0; i < nAggregatedChannels[j]; i++)
-                if (pCircularBuffer[j][i] != NULL)
-                    free(pCircularBuffer[j][i]);
+                delete pRingBuffer[j][i];
 
-            free(pCircularBuffer[j]);
+            free(pRingBuffer[j]);
         }
         // Set number of aggregated channels back to 0
         nAggregatedChannels[j] = 0;
@@ -368,34 +367,23 @@ HRESULT Aggregator::InitializeCapture()
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
         nAggregatedChannels[AGGREGATOR_CAPTURE] += pwfx[AGGREGATOR_CAPTURE][i]->nChannels;
     
-    pCircularBuffer[AGGREGATOR_CAPTURE] = (FLOAT**)malloc(nAggregatedChannels[AGGREGATOR_CAPTURE] * sizeof(FLOAT*));
-    if (pCircularBuffer[AGGREGATOR_CAPTURE] == NULL)
-    {
-        hr = ENOMEM;
-        goto Exit;
-    }
-#ifdef DEBUG
-    memset(pCircularBuffer[AGGREGATOR_CAPTURE], 1, nAggregatedChannels[AGGREGATOR_CAPTURE] * sizeof(FLOAT*));
-#endif
-
+    //-------- Create input ring buffer
+    pRingBuffer[AGGREGATOR_CAPTURE] = (RingBufferChannel**)malloc(nAggregatedChannels[AGGREGATOR_CAPTURE] * sizeof(RingBufferChannel*));
     for (UINT32 i = 0; i < nAggregatedChannels[AGGREGATOR_CAPTURE]; i++)
-    {
-        pCircularBuffer[AGGREGATOR_CAPTURE][i] = (FLOAT*)malloc(nCircularBufferSize[AGGREGATOR_CAPTURE] * sizeof(FLOAT));
-        if (pCircularBuffer[AGGREGATOR_CAPTURE][i] == NULL)
-        {
-            hr = ENOMEM;
-            goto Exit;
-        }
-#ifdef DEBUG
-        memset(pCircularBuffer[AGGREGATOR_CAPTURE][i], 1, nCircularBufferSize[AGGREGATOR_CAPTURE] * sizeof(FLOAT));
-#endif
-    }
-
+        pRingBuffer[AGGREGATOR_CAPTURE][i] = new RingBufferChannel();
+    
     //-------- Initialize AudioBuffer objects' buffers using the obtained information
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]; i++)
     {
+        UINT32 nChannels = pAudioBuffer[AGGREGATOR_CAPTURE][i]->GetChannelNumber();
+        
+        RingBufferChannel** pBuffer = (RingBufferChannel**)malloc(nChannels * sizeof(RingBufferChannel*));
+
+        for (UINT32 j = 0; j < nChannels; j++)
+            pBuffer[j] = pRingBuffer[AGGREGATOR_CAPTURE][i];
+
         hr = pAudioBuffer[AGGREGATOR_CAPTURE][i]->InitBuffer(&nEndpointBufferSize[AGGREGATOR_CAPTURE][i],
-                                                    pCircularBuffer[AGGREGATOR_CAPTURE],
+                                                    pBuffer,
                                                     &nCircularBufferSize[AGGREGATOR_CAPTURE],
                                                     nUpsample[AGGREGATOR_CAPTURE][i], 
                                                     nDownsample[AGGREGATOR_CAPTURE][i]);
@@ -424,14 +412,14 @@ Exit:
     }
 
     // Free circular buffer
-    if (pCircularBuffer[AGGREGATOR_CAPTURE] != NULL)
+    if (pRingBuffer[AGGREGATOR_CAPTURE] != NULL)
     {
         for (UINT32 i = 0; i < nAggregatedChannels[AGGREGATOR_CAPTURE]; i++)
-            if (pCircularBuffer[AGGREGATOR_CAPTURE][i] != NULL)
-                free(pCircularBuffer[AGGREGATOR_CAPTURE][i]);
+            delete pRingBuffer[AGGREGATOR_CAPTURE][i];
 
-        free(pCircularBuffer[AGGREGATOR_CAPTURE]);
+        free(pRingBuffer[AGGREGATOR_CAPTURE]);
     }
+
     // Set number of aggregated channels back to 0
     nAggregatedChannels[AGGREGATOR_CAPTURE] = 0;
 
@@ -610,34 +598,23 @@ HRESULT Aggregator::InitializeRender()
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
         nAggregatedChannels[AGGREGATOR_RENDER] += pwfx[AGGREGATOR_RENDER][i]->nChannels;
 
-    pCircularBuffer[AGGREGATOR_RENDER] = (FLOAT**)malloc(nAggregatedChannels[AGGREGATOR_RENDER] * sizeof(FLOAT*));
-    if (pCircularBuffer[AGGREGATOR_RENDER] == NULL)
-    {
-        hr = ENOMEM;
-        goto Exit;
-    }
-#ifdef DEBUG
-    memset(pCircularBuffer[AGGREGATOR_RENDER], 1, nAggregatedChannels[AGGREGATOR_RENDER] * sizeof(FLOAT*));
-#endif
-
+    //-------- Create input ring buffer
+    pRingBuffer[AGGREGATOR_RENDER] = (RingBufferChannel**)malloc(nAggregatedChannels[AGGREGATOR_RENDER] * sizeof(RingBufferChannel*));
     for (UINT32 i = 0; i < nAggregatedChannels[AGGREGATOR_RENDER]; i++)
-    {
-        pCircularBuffer[AGGREGATOR_RENDER][i] = (FLOAT*)malloc(nCircularBufferSize[AGGREGATOR_RENDER] * sizeof(FLOAT));
-        if (pCircularBuffer[AGGREGATOR_RENDER][i] == NULL)
-        {
-            hr = ENOMEM;
-            goto Exit;
-        }
-#ifdef DEBUG
-        memset(pCircularBuffer[AGGREGATOR_RENDER][i], 1, nCircularBufferSize[AGGREGATOR_RENDER] * sizeof(FLOAT));
-#endif
-    }
+        pRingBuffer[AGGREGATOR_RENDER][i] = new RingBufferChannel();
 
     //-------- Initialize AudioBuffer objects' buffers using the obtained information
     for (UINT32 i = 0; i < nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]; i++)
     {
+        UINT32 nChannels = pAudioBuffer[AGGREGATOR_RENDER][i]->GetChannelNumber();
+
+        RingBufferChannel** pBuffer = (RingBufferChannel**)malloc(nChannels * sizeof(RingBufferChannel*));
+
+        for (UINT32 j = 0; j < nChannels; j++)
+            pBuffer[j] = pRingBuffer[AGGREGATOR_RENDER][i];
+
         hr = pAudioBuffer[AGGREGATOR_RENDER][i]->InitBuffer(&nEndpointBufferSize[AGGREGATOR_RENDER][i],
-                                                            pCircularBuffer[AGGREGATOR_RENDER],
+                                                            pBuffer,
                                                             &nCircularBufferSize[AGGREGATOR_RENDER],
                                                             nUpsample[AGGREGATOR_RENDER][i],
                                                             nDownsample[AGGREGATOR_RENDER][i]);
@@ -666,14 +643,14 @@ Exit:
     }
 
     // Free circular buffer
-    if (pCircularBuffer[AGGREGATOR_RENDER] != NULL)
+    if (pRingBuffer[AGGREGATOR_RENDER] != NULL)
     {
         for (UINT32 i = 0; i < nAggregatedChannels[AGGREGATOR_RENDER]; i++)
-            if (pCircularBuffer[AGGREGATOR_RENDER][i] != NULL)
-                free(pCircularBuffer[AGGREGATOR_RENDER][i]);
+            delete pRingBuffer[AGGREGATOR_RENDER][i];
 
-        free(pCircularBuffer[AGGREGATOR_RENDER]);
+        free(pRingBuffer[AGGREGATOR_RENDER]);
     }
+
     // Set number of aggregated channels back to 0
     nAggregatedChannels[AGGREGATOR_RENDER] = 0;
 
@@ -1385,7 +1362,91 @@ Exit:
 
 DWORD WINAPI DSPThread(LPVOID lpParam)
 {
-    return 0;
+    HRESULT hr = ERROR_SUCCESS;
+    DSPTHREADPARAM* pDSPThreadParam = (DSPTHREADPARAM*)lpParam;
+
+    std::cout << MSG "Starting interactive CLI and Audio Effect threads." << std::endl;
+
+    // Create an a separate thread for each AudioEffect
+    HANDLE* hAudioEffectThread = (HANDLE*)malloc(pDSPThreadParam->nDevices * sizeof(HANDLE));
+    DWORD* dwAudioEffectThreadId = (DWORD*)malloc(pDSPThreadParam->nDevices * sizeof(DWORD));
+    AUDIOEFFECTTHREADPARAM* pAudioEffectThreadParam = (AUDIOEFFECTTHREADPARAM*)malloc(pDSPThreadParam->nDevices * sizeof(AUDIOEFFECTTHREADPARAM));
+    
+    if (hAudioEffectThread == NULL || dwAudioEffectThreadId == NULL || pAudioEffectThreadParam == NULL)
+    {
+        std::cout << ERR "Failed to allocate heap for Audio Effect threads." << std::endl;
+
+        hr = ENOMEM;
+            EXIT_ON_ERROR(hr)
+    }
+    
+    for (UINT32 i = 0; i < pDSPThreadParam->nDevices; i++)
+    {
+        
+        hAudioEffectThread[i] = CreateThread(NULL, 0, AudioEffectThread, (LPVOID)&pAudioEffectThreadParam[i], 0, &dwAudioEffectThreadId[i]);
+        
+        if (hAudioEffectThread[i] == NULL)
+        {
+            std::cout << ERR "Failed to create an Audio Effect thread." << std::endl;
+
+            hr = ERROR_SERVICE_NO_THREAD;
+                EXIT_ON_ERROR(hr)
+        }
+    }
+
+    std::cout << MSG "Succesfully created all Audio Effect threads." << std::endl;
+
+    //////////////////////////////////////////////////////////////////////
+    //////////////// TODO: add interactive CLI logic here ////////////////
+    //////////////////////////////////////////////////////////////////////
+    while (!*pDSPThreadParam->bDone)
+    {
+
+    }
+    //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
+
+    std::cout << MSG "Waiting on Audio Effect threads." << std::endl;
+
+    WaitForMultipleObjects(pDSPThreadParam->nDevices, hAudioEffectThread, TRUE, INFINITE);
+    for (UINT32 i = 0; i < pDSPThreadParam->nDevices; i++)
+    {
+        CloseHandle(hAudioEffectThread[i]);
+        hAudioEffectThread[i] = NULL;
+        dwAudioEffectThreadId[i] = NULL;
+    }
+    if (hAudioEffectThread != NULL) free(hAudioEffectThread);
+    if (dwAudioEffectThreadId != NULL) free(dwAudioEffectThreadId);
+    free(pAudioEffectThreadParam);
+
+    std::cout << MSG "Succesfully closed all Audio Effect threads." << std::endl;
+
+    return hr;
+
+Exit:
+    return hr;
 }
 
+DWORD WINAPI AudioEffectThread(LPVOID lpParam)
+{
+    HRESULT hr = ERROR_SUCCESS;
+    AUDIOEFFECTTHREADPARAM* pAudioEffectThreadParam = (AUDIOEFFECTTHREADPARAM*)lpParam;
+    UINT32 nFramesAvailable = 0;
 
+    while (!*pAudioEffectThreadParam->bDone)
+    {
+        if ((nFramesAvailable = pAudioEffectThreadParam->pAudioBuffer[AGGREGATOR_CAPTURE]->FramesAvailable()) > 0)
+        {
+            // Read data from the input ring buffer into the audio effect
+            pAudioEffectThreadParam->pAudioBuffer[AGGREGATOR_CAPTURE]->ReadNextPacket(pAudioEffectThreadParam->pEffect);
+            // Write data from audio effect into the output ring buffer
+            pAudioEffectThreadParam->pAudioBuffer[AGGREGATOR_RENDER]->WriteNextPacket(pAudioEffectThreadParam->pEffect);
+        }
+    }
+
+    return hr;
+
+Exit:
+    return hr;
+}
