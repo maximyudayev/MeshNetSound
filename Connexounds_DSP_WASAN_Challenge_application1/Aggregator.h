@@ -55,8 +55,8 @@ typedef struct DSPThreadParam {
 
 typedef struct AudioEffectThreadParam {
 	BOOL* bDone;
-	UINT32 nChannels[2];
-	AudioBuffer* pAudioBuffer[2];
+	UINT32 nChannels;
+	RingBufferChannel** pRingChannel;
 	AudioEffect* pEffect;
 } AUDIOEFFECTTHREADPARAM;
 

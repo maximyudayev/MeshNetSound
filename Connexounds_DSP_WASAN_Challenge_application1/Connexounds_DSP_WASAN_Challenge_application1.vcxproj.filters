@@ -13,6 +13,15 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\lib">
+      <UniqueIdentifier>{2a3075fa-9b93-4ef3-b6c3-8a71391e5f30}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\lib\cli">
+      <UniqueIdentifier>{bdb0e125-7ab9-4b97-bb86-9da5fa62504f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\lib\cli\detail">
+      <UniqueIdentifier>{d4c3f4f5-1914-4948-ba40-63e729f8df21}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioBuffer.cpp">
@@ -67,6 +76,78 @@
     </ClInclude>
     <ClInclude Include="RingBufferChannel.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\cli.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\cliasyncsession.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\clifilesession.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\clilocalsession.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\colorprofile.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\filehistorystorage.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\historystorage.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\remotecli.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\volatilehistorystorage.h">
+      <Filter>Header Files\lib\cli</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\boostasio.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\commonprefix.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\fromstring.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\history.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\inputdevice.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\inputhandler.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\keyboard.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\linuxkeyboard.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\newboostasio.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\oldboostasio.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\rang.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\server.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\split.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\terminal.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\cli\detail\winkeyboard.h">
+      <Filter>Header Files\lib\cli\detail</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

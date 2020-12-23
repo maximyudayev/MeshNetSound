@@ -5,6 +5,11 @@
 
 #include "Aggregator.h"
 #include <iostream>
+#include "lib/cli/cli.h"
+#include "lib/cli/clifilesession.h"
+
+using namespace cli;
+using namespace std;
 
 /// <summary>
 /// <para>Entry point of the program.</para>
@@ -14,47 +19,66 @@
 /// <returns></returns>
 int main(int argc, char* argv[])
 {
-	HRESULT hr = ERROR_SUCCESS;
+    // ASCII art
+    std::cout
+        << "                           " GREEN("__   __") "                     _     "         << std::endl
+        << "                           " GREEN("\\ \\ / /") "                    | |    "       << std::endl
+        << "  ___ ___  _ __  _ __   ___ " GREEN("\\ V /") " ___  _   _ _ __   __| |___ "        << std::endl
+        << " / __/ _ \\| '_ \\| '_ \\ / _ \\ " GREEN("> <") " / _ \\| | | | '_ \\ / _` / __|"   << std::endl
+        << "| (_| (_) | | | | | | |  __/" GREEN("/ . \\") " (_) | |_| | | | | (_| \\__ \\"      << std::endl
+        << " \\___\\___/|_| |_|_| |_|\\___" GREEN("/_/ \\_\\") "___/ \\__,_|_| |_|\\__,_|___/"  << std::endl
+        << std::endl;
 
-	// ASCII art
-	std::cout << R"(                           __   __                     _     
-                           \ \ / /                    | |    
-  ___ ___  _ __  _ __   ___ \ V / ___  _   _ _ __   __| |___ 
- / __/ _ \| '_ \| '_ \ / _ \ > < / _ \| | | | '_ \ / _` / __|
-| (_| (_) | | | | | | |  __// . \ (_) | |_| | | | | (_| \__ \
- \___\___/|_| |_|_| |_|\___/_/ \_\___/ \__,_|_| |_|\__,_|___/
-                                                             )" << std::endl;
+    HRESULT hr = ERROR_SUCCESS;
+    Aggregator pAggregator;
+    BOOL bQuit = FALSE;
 
-	// 
-	std::cout << "<--------Starting Aggregator-------->" << std::endl << std::endl;
+    /////////////////////////////////////////////////
+	//////////////// Interactive CLI ////////////////
+	/////////////////////////////////////////////////
+    auto rootMenu = make_unique< Menu >("cli");
+    rootMenu->Insert(
+        "hello",
+        [&pAggregator](std::ostream& out) { out << "Hello, world\n"; pAggregator.Initialize(); },
+        "Print hello world");
+    rootMenu->Insert(
+        "answer",
+        [](std::ostream& out, int x) { out << "The answer is: " << x << "\n"; },
+        "Print the answer to Life, the Universe and Everything ");
+    rootMenu->Insert(
+        "color",
+        [](std::ostream& out) { out << "Colors ON\n"; SetColor(); },
+        "Enable colors in the cli");
+    rootMenu->Insert(
+        "nocolor",
+        [](std::ostream& out) { out << "Colors OFF\n"; SetNoColor(); },
+        "Disable colors in the cli");
+    
+    auto subMenu = make_unique< Menu >("sub");
+    subMenu->Insert(
+        "hello",
+        [](std::ostream& out) { out << "Hello, submenu world\n"; },
+        "Print hello world in the submenu");
+    subMenu->Insert(
+        "demo",
+        [](std::ostream& out) { out << "This is a sample!\n"; },
+        "Print a demo string");
 
-	Aggregator pAggregator;
-	CHAR sInput[2]; // buffer to receive quit command
-	BOOL bQuit = FALSE;
-	
-	hr = pAggregator.Initialize();
-	
-	hr = pAggregator.Start();
+    auto subSubMenu = make_unique< Menu >("subsub");
+    subSubMenu->Insert(
+        "hello",
+        [](std::ostream& out) { out << "Hello, subsubmenu world\n"; },
+        "Print hello world in the sub-submenu");
+    subMenu->Insert(std::move(subSubMenu));
 
-	// "Interactive" CLI
-	// continues capturing until user clicks [q] : quit
-	while (!bQuit)
-	{
-		std::cin.get(sInput, 2);
-		std::string str(sInput);
+    rootMenu->Insert(std::move(subMenu));
 
-		// Skip cin to next line to accept another input on next loop iteration
-		std::cin.clear();
-		std::cin.ignore(2, '\n');
-
-		// If user pressed q, hence terminates the program
-		if (strcmp(str.c_str(), "q") == 0) break;
-		// If user pressed any other button
-		else
-			std::cout << MSG "Press [q] to exit." << std::endl;
-	}
-
-	hr = pAggregator.Stop();
+    Cli cli(std::move(rootMenu));
+    // global exit action
+    cli.ExitAction([&pAggregator](auto& out) { out << "Goodbye and thanks for all the fish.\n"; pAggregator.Stop(); });
+    
+    CliFileSession input(cli);
+    input.Start();
 
 	return hr;
 }

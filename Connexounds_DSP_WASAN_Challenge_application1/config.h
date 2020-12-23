@@ -42,6 +42,9 @@
     #define AGGREGATOR_OP_ATTEMPTS 5
 #endif
 
+#ifndef AUDIOEFFECT_OUTPUT_BUFFER_SIZE
+    #define AUDIOEFFECT_OUTPUT_BUFFER_SIZE 2048
+#endif
 //-------- Resampler Macros
 #define RESAMPLER_IZERO_EPSILON 1E-21               // Max error acceptable in Izero 
 #define RESAMPLER_ROLLOFF_FREQ 0.9                  //  
@@ -55,11 +58,15 @@
 #define RESAMPLER_N_QUALITY_H 35		            // Some freaky alien quality
 
 //-------- Debug Macros
-#define DEBUG                                       
+#define DEBUG
+
+#define GREEN(text) "\033[32m" text "\033[0m"
 
 #define MSG "[MSG]: "
-#define WARN "[WRN]: "
-#define ERR "[ERR]: "
+#define SUC "\033[32m[SUC]: "
+#define WRN "\033[33m[WRN]: "
+#define ERR "\033[31m[ERR]: "
+#define END "\033[0m"
 #define TAB "       "
 
 //-------- Temporary Macros for WiFi-related stuff that must be replaced with proper code/negotiation

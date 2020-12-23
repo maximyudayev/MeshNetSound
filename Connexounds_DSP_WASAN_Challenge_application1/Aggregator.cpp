@@ -18,6 +18,8 @@
 */
 
 #include "Aggregator.h"
+#include "Flanger.h"
+#include "PitchShifter.h"
 
 //---------- Windows macro definitions ----------------------------------------------//
 static const CLSID  CLSID_MMDeviceEnumerator    = __uuidof(MMDeviceEnumerator);
@@ -103,6 +105,8 @@ HRESULT Aggregator::Initialize()
     HRESULT hr = ERROR_SUCCESS;
     UINT32 attempt = 0;
 
+    std::cout << "<-------- Starting Aggregator -------->" << std::endl << std::endl;
+
     //-------- Initialize Aggregator basics
     hr = CoInitialize(0);
         EXIT_ON_ERROR(hr)
@@ -165,7 +169,7 @@ HRESULT Aggregator::Initialize()
     std::cout   << MSG << nDevices[AGGREGATOR_CAPTURE] + nWASANNodes[AGGREGATOR_CAPTURE]
                 << " inputs and "
                 << nDevices[AGGREGATOR_RENDER] + nWASANNodes[AGGREGATOR_RENDER]
-                << " outputs selected."
+                << " outputs selected." END
                 << std::endl << std::endl;
 
     //---------------- Initialization ----------------//
@@ -174,15 +178,15 @@ HRESULT Aggregator::Initialize()
     if (nWASANNodes[AGGREGATOR_CAPTURE] != 0 || nWASANNodes[AGGREGATOR_RENDER] != 0)
     {
         WSADATA wsa;
-        std::cout << MSG << "Initialising Winsock DLL..." << std::endl;
+        std::cout << MSG "Initialising Winsock DLL..." END << std::endl;
         if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
         {
-            std::cout   << ERR << "Winsock initialization failed. Error Code: " 
-                        << WSAGetLastError() 
+            std::cout   << ERR "Winsock initialization failed. Error Code: " 
+                        << WSAGetLastError() << END
                         << std::endl;
             exit(EXIT_FAILURE);
         }
-        std::cout << MSG << "Success. Winsock initialized." << std::endl;
+        std::cout << SUC "Success. Winsock initialized." END << std::endl;
     }
 
     //-------- Allocate space for indices of 1 input ring buffer and 1 output ring buffer 
@@ -723,7 +727,7 @@ HRESULT Aggregator::StartCapture()
             EXIT_ON_ERROR(hr)
     }
 
-    std::cout << MSG "Starting audio capture." << std::endl;
+    std::cout << MSG "Starting audio capture." END << std::endl;
 
     if (nWASANNodes[AGGREGATOR_CAPTURE] > 0 && nDevices[AGGREGATOR_CAPTURE] > 0)
     {
@@ -754,13 +758,13 @@ HRESULT Aggregator::StartCapture()
 
         if (hCaptureThread[nThreadId] == NULL)
         {
-            std::cout << ERR "Failed to create UDP Server thread." << std::endl;
+            std::cout << ERR "Failed to create UDP Server thread." END << std::endl;
 
             hr = ERROR_SERVICE_NO_THREAD;
                 EXIT_ON_ERROR(hr)
         }
 
-        std::cout << MSG "Succesfully created UDP Server thread." << std::endl;
+        std::cout << SUC "Succesfully created UDP Server thread." END << std::endl;
         nThreadId++; // increment the helper variable
     }
 
@@ -784,13 +788,13 @@ HRESULT Aggregator::StartCapture()
 
         if (hCaptureThread[nThreadId] == NULL)
         {
-            std::cout << ERR "Failed to create WASAPI capture thread." << std::endl;
+            std::cout << ERR "Failed to create WASAPI capture thread." END << std::endl;
 
             hr = ERROR_SERVICE_NO_THREAD;
                 EXIT_ON_ERROR(hr)
         }
 
-        std::cout << MSG "Succesfully created WASAPI capture thread." << std::endl;
+        std::cout << SUC "Succesfully created WASAPI capture thread." END << std::endl;
     }
 
     return hr;
@@ -809,7 +813,7 @@ HRESULT Aggregator::StopCapture()
         hr = pAudioClient[AGGREGATOR_CAPTURE][i]->Stop();  
             EXIT_ON_ERROR(hr)
     }
-    std::cout << MSG "Stopped audio capture." << std::endl;
+    std::cout << MSG "Stopped audio capture." END << std::endl;
 
     // Wait for capture threads to terminate
     WaitForMultipleObjects(nCaptureThread, hCaptureThread, TRUE, INFINITE);
@@ -847,7 +851,7 @@ HRESULT Aggregator::StartRender()
             EXIT_ON_ERROR(hr)
     }
 
-    std::cout << MSG "Starting audio render." << std::endl;
+    std::cout << MSG "Starting audio render." END << std::endl;
 
     if (nWASANNodes[AGGREGATOR_RENDER] > 0 || nDevices[AGGREGATOR_RENDER] > 0)
     {
@@ -873,13 +877,13 @@ HRESULT Aggregator::StartRender()
 
         if (hRenderThread[nThreadId] == NULL)
         {
-            std::cout << ERR "Failed to create audio render Aggregator thread." << std::endl;
+            std::cout << ERR "Failed to create audio render Aggregator thread." END << std::endl;
 
             hr = ERROR_SERVICE_NO_THREAD;
                 EXIT_ON_ERROR(hr)
         }
 
-        std::cout << MSG "Succesfully created audio render Aggregator thread." << std::endl;
+        std::cout << SUC "Succesfully created audio render Aggregator thread." END << std::endl;
     } // else it remains 0
 
     return hr;
@@ -898,7 +902,7 @@ HRESULT Aggregator::StopRender()
         hr = pAudioClient[AGGREGATOR_RENDER][i]->Stop();  
             EXIT_ON_ERROR(hr)
     }
-    std::cout << MSG "Stopped audio render." << std::endl;
+    std::cout << MSG "Stopped audio render." END << std::endl;
 
     // Wait for render threads to terminate
     WaitForMultipleObjects(nRenderThread, hRenderThread, TRUE, INFINITE);
@@ -935,7 +939,9 @@ HRESULT Aggregator::ListAvailableDevices(UINT8 nDeviceType)
     
     if (nAllDevices[nDeviceType] == 0)
     {
-        std::cout << MSG "No " << ((nDeviceType == AGGREGATOR_CAPTURE)? "capture" : "render") << " endpoints were detected" << std::endl;
+        std::cout   << MSG "No " << ((nDeviceType == AGGREGATOR_CAPTURE)? "capture" : "render") 
+                    << " endpoints were detected" END 
+                    << std::endl;
         hr = RPC_S_NO_ENDPOINT_FOUND;
         goto Exit;
     }
@@ -1019,14 +1025,14 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
     //-------- Prompt user to connect WASAN nodes
     std::cout << MSG "Enter the IP addresses of "
         << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
-        << " WASAN nodes. I.e: 192.168.137.1" << std::endl;
+        << " WASAN nodes. I.e: 192.168.137.1" END << std::endl;
 
     while (!bUserDone)
     {
         std::cout << MSG "Choose next "
             << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
             << " WASAN node (currently selected "
-            << nWASANNodes[nDeviceType] << " nodes) or press [ENTER] to proceed."
+            << nWASANNodes[nDeviceType] << " nodes) or press [ENTER] to proceed." END
             << std::endl;
 
         std::cin.get(sInput, AGGREGATOR_CIN_IP_LEN);
@@ -1053,7 +1059,7 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
             // Check if this node is already chosen
             if (nStringCompare == 0)
             {
-                std::cout << WARN "You cannot choose the same node more than once." << std::endl;
+                std::cout << WRN "You cannot choose the same node more than once." END << std::endl;
                 continue;
             }
             // If all is good, add the device into the list of nodes to use for aggregator
@@ -1077,7 +1083,7 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
 
     std::cout << MSG << nWASANNodes[nDeviceType]
         << ((nDeviceType == AGGREGATOR_CAPTURE) ? " capture" : " render")
-        << " WASAN nodes selected."
+        << " WASAN nodes selected." END
         << std::endl << std::endl;
 
     //-------- Prompt user for current device's IP address if any WASAN capture nodes are to be connected
@@ -1085,13 +1091,13 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
     {
         std::cout   << MSG "Enter the IP address of this device on which to listen to WASAN capture nodes as a UDP server." << std::endl
                     << TAB "In current implementation, enter the IP address from the mobile hotspot tab. I.e: 192.168.137.1" << std::endl
-                    << TAB "Update firewall rules to allow UDP traffic on that IP, on port " << UDP_RCV_PORT << " , on public networks."
+                    << TAB "Update firewall rules to allow UDP traffic on that IP, on port " << UDP_RCV_PORT << " , on public networks." END
                     << std::endl << std::endl;
 
         bUserDone = FALSE;
         while (!bUserDone)
         {
-            std::cout << MSG "Enter this device's (UDP server) IP address." << std::endl;
+            std::cout << MSG "Enter this device's (UDP server) IP address." END << std::endl;
 
             std::cin.get(sInput, AGGREGATOR_CIN_IP_LEN);
             std::string str(sInput);
@@ -1103,7 +1109,7 @@ HRESULT Aggregator::GetWASANNodes(UINT8 nDeviceType)
             // If user attempts to proceed without enterint own IP address
             if (str.length() == 0)
             {
-                std::cout << WARN "You must enter this device's IP address to act as UDP server to receive audio streams from other WASAN capture nodes." << std::endl;
+                std::cout << WRN "You must enter this device's IP address to act as UDP server to receive audio streams from other WASAN capture nodes." END << std::endl;
                 continue;
             }
             // If user entered a number, copy IP to Aggregator and exit loop
@@ -1140,7 +1146,7 @@ HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
         << nAllDevices[nDeviceType]
         << " hardware "
         << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
-        << " devices."
+        << " devices." END
         << std::endl;
 
     //-------- Prompt user to select an input device until they indicate they are done or until no more devices are left
@@ -1149,7 +1155,7 @@ HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
         std::cout << MSG "Choose next "
             << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
             << " device (currently selected "
-            << nDevices[nDeviceType] << " devices) or press [ENTER] to proceed."
+            << nDevices[nDeviceType] << " devices) or press [ENTER] to proceed." END
             << std::endl;
 
         std::cin.get(sInput, AGGREGATOR_CIN_DEVICEID_LEN);
@@ -1164,9 +1170,9 @@ HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
         // If user attempts to proceed without choosing a single device or WASAN node
         else if (str.length() == 0 && nDevices[nDeviceType] == 0 && nWASANNodes[nDeviceType] == 0)
         {
-            std::cout << WARN "You must choose at least 1 "
+            std::cout << WRN "You must choose at least 1 "
                 << ((nDeviceType == AGGREGATOR_CAPTURE) ? "capture" : "render")
-                << " device."
+                << " device." END
                 << std::endl;
             continue;
         }
@@ -1179,8 +1185,8 @@ HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
             // Check if user input a number within the range of available device indices
             if (nUserChoice < 0 || nUserChoice > nAllDevices[nDeviceType] - 1)
             {
-                std::cout << WARN "You must pick one of existing devices, a number between 0 and "
-                    << nAllDevices[nDeviceType] - 1
+                std::cout << WRN "You must pick one of existing devices, a number between 0 and "
+                    << nAllDevices[nDeviceType] - 1 << END
                     << std::endl;
                 continue;
             }
@@ -1195,7 +1201,7 @@ HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
             // Check if this device is already chosen
             if (bInSet)
             {
-                std::cout << WARN "You cannot choose the same device more than once." << std::endl;
+                std::cout << WRN "You cannot choose the same device more than once." END << std::endl;
                 continue;
             }
             // If all is good, add the device into the list of devices to use for aggregator
@@ -1218,7 +1224,7 @@ HRESULT Aggregator::GetWASAPIDevices(UINT8 nDeviceType)
     }
     std::cout << MSG << nDevices[nDeviceType]
         << ((nDeviceType == AGGREGATOR_CAPTURE) ? " capture" : " render")
-        << " devices selected."
+        << " devices selected." END
         << std::endl << std::endl;
 
     return hr;
@@ -1253,7 +1259,7 @@ DWORD WINAPI UDPCaptureThread(LPVOID lpParam)
         // Destroy socket after server returns from the receive routine
         CloseSocketUDP(server);
     }
-    std::cout << MSG << "UDP capture thread exited." << std::endl;
+    std::cout << MSG << "UDP capture thread exited." END << std::endl;
 
     return 0;
 }
@@ -1283,7 +1289,7 @@ DWORD WINAPI WASAPICaptureThread(LPVOID lpParam)
                 if (*pCaptureThreadParam->flags[i] & AUDCLNT_BUFFERFLAGS_SILENT)
                     pCaptureThreadParam->pData[i] = NULL;  // Tell PullData to write silence.
 
-                hr = pCaptureThreadParam->pAudioBuffer[i]->PullData(pCaptureThreadParam->pData[i]);
+                hr = pCaptureThreadParam->pAudioBuffer[i]->PushData(pCaptureThreadParam->pData[i]);
                     EXIT_ON_ERROR(hr)
 
                 hr = pCaptureThreadParam->pCaptureClient[i]->ReleaseBuffer(*pCaptureThreadParam->nEndpointBufferSize[i]);
@@ -1292,7 +1298,7 @@ DWORD WINAPI WASAPICaptureThread(LPVOID lpParam)
         }
     }
 
-    std::cout << MSG << "WASAPI capture thread exited." << std::endl;
+    std::cout << MSG << "WASAPI capture thread exited." END << std::endl;
 
     return hr;
 
@@ -1325,7 +1331,7 @@ DWORD WINAPI RenderThread(LPVOID lpParam)
                     EXIT_ON_ERROR(hr)
 
                 // Load data from AudioBuffer's ring buffer into the WASAPI buffer for this device
-                hr = pRenderThreadParam->pAudioBuffer[i]->PushData(pRenderThreadParam->pData[i], *pRenderThreadParam->nEndpointBufferSize[i]);
+                hr = pRenderThreadParam->pAudioBuffer[i]->PullData(pRenderThreadParam->pData[i], *pRenderThreadParam->nEndpointBufferSize[i]);
                     EXIT_ON_ERROR(hr)
 
                 // Release buffer before next packet
@@ -1360,12 +1366,13 @@ Exit:
     return hr;
 }
 
+// Move AudioEffect thread creation back into the init function
 DWORD WINAPI DSPThread(LPVOID lpParam)
 {
     HRESULT hr = ERROR_SUCCESS;
     DSPTHREADPARAM* pDSPThreadParam = (DSPTHREADPARAM*)lpParam;
 
-    std::cout << MSG "Starting interactive CLI and Audio Effect threads." << std::endl;
+    std::cout << MSG "Starting interactive CLI and Audio Effect threads." END << std::endl;
 
     // Create an a separate thread for each AudioEffect
     HANDLE* hAudioEffectThread = (HANDLE*)malloc(pDSPThreadParam->nDevices * sizeof(HANDLE));
@@ -1374,7 +1381,7 @@ DWORD WINAPI DSPThread(LPVOID lpParam)
     
     if (hAudioEffectThread == NULL || dwAudioEffectThreadId == NULL || pAudioEffectThreadParam == NULL)
     {
-        std::cout << ERR "Failed to allocate heap for Audio Effect threads." << std::endl;
+        std::cout << ERR "Failed to allocate heap for Audio Effect threads." END << std::endl;
 
         hr = ENOMEM;
             EXIT_ON_ERROR(hr)
@@ -1382,32 +1389,26 @@ DWORD WINAPI DSPThread(LPVOID lpParam)
     
     for (UINT32 i = 0; i < pDSPThreadParam->nDevices; i++)
     {
-        
+        pAudioEffectThreadParam[i].pAudioBuffer[AGGREGATOR_CAPTURE]->
+        pAudioEffectThreadParam[i].pEffect = new Flanger(AGGREGATOR_SAMPLE_FREQ, )
+
+
         hAudioEffectThread[i] = CreateThread(NULL, 0, AudioEffectThread, (LPVOID)&pAudioEffectThreadParam[i], 0, &dwAudioEffectThreadId[i]);
         
         if (hAudioEffectThread[i] == NULL)
         {
-            std::cout << ERR "Failed to create an Audio Effect thread." << std::endl;
+            std::cout << ERR "Failed to create an Audio Effect thread." END << std::endl;
 
             hr = ERROR_SERVICE_NO_THREAD;
                 EXIT_ON_ERROR(hr)
         }
     }
 
-    std::cout << MSG "Succesfully created all Audio Effect threads." << std::endl;
+    std::cout << SUC "Succesfully created all Audio Effect threads." END << std::endl;
 
-    //////////////////////////////////////////////////////////////////////
-    //////////////// TODO: add interactive CLI logic here ////////////////
-    //////////////////////////////////////////////////////////////////////
-    while (!*pDSPThreadParam->bDone)
-    {
+    
 
-    }
-    //////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////
-
-    std::cout << MSG "Waiting on Audio Effect threads." << std::endl;
+    std::cout << MSG "Waiting on Audio Effect threads." END << std::endl;
 
     WaitForMultipleObjects(pDSPThreadParam->nDevices, hAudioEffectThread, TRUE, INFINITE);
     for (UINT32 i = 0; i < pDSPThreadParam->nDevices; i++)
@@ -1416,11 +1417,23 @@ DWORD WINAPI DSPThread(LPVOID lpParam)
         hAudioEffectThread[i] = NULL;
         dwAudioEffectThreadId[i] = NULL;
     }
-    if (hAudioEffectThread != NULL) free(hAudioEffectThread);
-    if (dwAudioEffectThreadId != NULL) free(dwAudioEffectThreadId);
-    free(pAudioEffectThreadParam);
+    if (hAudioEffectThread != NULL) 
+    { 
+        free(hAudioEffectThread);
+        hAudioEffectThread = NULL;
+    }
+    if (dwAudioEffectThreadId != NULL) 
+    {
+        free(dwAudioEffectThreadId);
+        dwAudioEffectThreadId = NULL;
+    }
+    if (pAudioEffectThreadParam != NULL) 
+    {
+        free(pAudioEffectThreadParam);
+        pAudioEffectThreadParam = NULL;
+    }
 
-    std::cout << MSG "Succesfully closed all Audio Effect threads." << std::endl;
+    std::cout << SUC "Succesfully closed all Audio Effect threads." END << std::endl;
 
     return hr;
 

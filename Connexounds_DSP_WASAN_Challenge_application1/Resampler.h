@@ -24,8 +24,6 @@ typedef struct endpointfmt {
 } ENDPOINTFMT;
 
 typedef struct resamplefmt {
-	RingBufferChannel** pBuffer;
-	UINT32* nBufferSize;
 	DWORD nUpsample;
 	DWORD nDownsample;
 	FLOAT fFactor;

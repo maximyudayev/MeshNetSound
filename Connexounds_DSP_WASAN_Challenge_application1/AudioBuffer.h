@@ -94,7 +94,7 @@ class AudioBuffer
 		/// ERROR_SUCCESS if buffer set up succeeded.
 		/// </returns>
 		HRESULT InitBuffer(UINT32* nEndpointBufferSize, RingBufferChannel** pCircularBuffer,
-							UINT32* nCircularBufferSize, DWORD nUpsample, DWORD nDownsample);
+							DWORD nUpsample, DWORD nDownsample);
 		
 		/// <summary>
 		/// <para>Initializes .WAV file headers for each channel of a device.
@@ -124,9 +124,8 @@ class AudioBuffer
 		/// captured endpoint data to consecutive row vectors of RESAMPLEFMT_T.pBuffer.</para>
 		/// </summary>
 		/// <param name="pData">- pointer to the first byte into the endpoint's newly captured packet.</param>
-		/// <param name="bDone">- address of the variable responsible for terminating the program.</param>
 		/// <returns></returns>
-		HRESULT PullData(BYTE* pData);
+		HRESULT PushData(BYTE* pData);
 		
 		/// <summary>
 		/// <para>Pushes data of the AudioBuffer into a corresponding render endpoint device.</para>
@@ -138,24 +137,18 @@ class AudioBuffer
 		/// <param name="pData">- pointer to the first byte into the buffer to place audio packet for render.</param>
 		/// <param name="nFrames">- number of frames available in the ring buffer to be pushed for render.</param>
 		/// <returns></returns>		
-		HRESULT PushData(BYTE* pData, UINT32 nFrames);
+		HRESULT PullData(BYTE* pData, UINT32 nFrames);
 
-		/// <summary>
-		/// <para>Returns a reference to a section of the input ringbuffer, extended with metadata inside a DSPpacket struct</para>
-		/// <para>Must be called by the DSPthread to provide the processing DSP objects to operate on buffer data
-		/// </para>
-		/// </summary>
-		/// <returns></returns>
+		UINT32 GetChannelNumber();
 
-		HRESULT ReadNextPacket(AudioEffect* pEffect);
+		RingBufferChannel** GetRingBufferChannel();
 
-		HRESULT WriteNextPacket(AudioEffect* pEffect);
+		HRESULT SetRingBufferChannel(RingBufferChannel** pChannelArray);
 
-		/// <summary>
-		/// <para>Gets the number of frames in the buffer available for reading.</para>
-		/// </summary>
-		/// <returns></returns>		
-		UINT32 FramesAvailable();
+
+
+
+		//////////////// Do these methods below belong here? ////////////////
 
 		/// <summary>
 		/// <para>Update the nMinFramesOut variable for the device associated with this AudioBuffer.</para>
@@ -171,12 +164,6 @@ class AudioBuffer
 		/// <returns>Least number of frames needed for safe SRC for this device.</returns>
 		UINT32 GetMinFramesOut();
 
-		UINT32 GetChannelNumber();
-
-		RingBufferChannel** GetRingBufferChannel();
-
-		HRESULT SetRingBufferChannel(RingBufferChannel** pChannelArray);
-		
 	protected:
 		/// <summary>
 		/// <para>Function for derived classes to simulate the effect of WASAPI updating endpoint
@@ -196,17 +183,19 @@ class AudioBuffer
 		BOOL				bOutputWAV						{ FALSE };
 	
 		// Circular buffer related variables
+		RingBufferChannel	** pRingBufferChannel;
 		Resampler			* pResampler;
 		RESAMPLEFMT			tResampleFmt;
 		UINT32				nTimeAlignOffset				{ 0 },
 							nMinFramesOut					{ 0 };		// Indicator for output ring buffer when safe to SRC for output
 																		// to avoid coming short on samples
-		
 		// Endpoint buffer related variables
 		ENDPOINTFMT			tEndpointFmt;
 
 		// Auxillary variables for grouping by memership
 		// to a particular ring buffer and global identification
+		std::string			sFriendlyName;
+
 		UINT32				nMemberId;						// AudioBuffer group membership alias of the device
 		static UINT32		nGroups;						// Counter of the number of AudioBuffer groups
 		static UINT32		nNewGroupId;					// Auto-incremented "GUID" of the AudioBuffer group

@@ -66,7 +66,7 @@ void UDPAudioBuffer::SendDataUDP(UINT32 nFrames)
 	UDPServer.sin_port = htons(UDP_RCV_PORT);
 
 	// Push data into the UDP sending buffer
-	this->PushData((BYTE*)buf, nFrames);
+	this->PullData((BYTE*)buf, nFrames);
 	
 	// Send UDP packet to WASAN render node
 	if (sendto(*this->pUDPSocket, buf, nFrames + 1, 0, (SOCKADDR*)&UDPServer, nServerLength) == SOCKET_ERROR)

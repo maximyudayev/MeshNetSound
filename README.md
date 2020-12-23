@@ -10,7 +10,7 @@ The aggregator uses 2 threads for capture:
 1. WASAPI device capture thread - receives packets from WASAPI in a polling or in event-driven fashion for each device
 1. UDP server thread - binds and continuously monitors port 42069 for incoming packets from connected WASAN nodes
 
-It efficiently sample rate converts all of the streams to the user chosen DSP sample rate (i.e 48000Hz), using the 
+It efficiently sample rate converts all of the streams to the user chosen DSP sample rate (i.e 48kHz), using the 
 [Flexible Sample Rate Conversion algorithm](https://ccrma.stanford.edu/~jos/resample/) by Julius O. Smith, and places each stream
 into the equisampled ring buffer.
 
@@ -18,7 +18,9 @@ The data is then available for consumption by the polyphonic DSP threads, which 
 audio effects on each, one, or multiple ring buffer channels concurrently. 
 
 After processing each batch of frames, the DSP block optionally mixes, scales, or combines channels into completely new
-and then places the resulting data into the output ring buffer.
+and then places the resulting data into the output ring buffer. Hence number of output ring buffer channels directly depends
+on the user's set of applied audio effects and mixing options; it is possible and expected that the system will produce
+more ring buffer channels than what are consumed by output devices to allow multiplexing for playback devices.
 
 Once data is available, render thread routes each of the output ring buffer channels into playback devices according to the
 channel selection, a.k.a channel mask, chosen by the user. The render thread pushes data into the playback device through the final
@@ -32,10 +34,11 @@ same data into simultaneously multiple distinct devices.
 - [X] **Inter-node audio transfer** - Rx/Tx of streams between WASAN nodes over WiFi-Direct
 - [X] **Recording** - simultaneous recording of stream(s) according to user's request
 - [ ] **Automated time alignment** - periodic TDE
-- [ ] **Noise cancellation** - sound enhancement based on WASAN cumulitive captured data
+- [ ] **Collaborative noise reduction** - WASAN collaborative SNR enhancement
+- [ ] **Echo cancellation** - cancellation of echo fed back to listener
 - [ ] **Dynamic configuration** - GUI support to dynamically change tool's settings (buffer size, sample rate, output MUX, mixing, etc.)
 - [ ] **Virtual audio device interface** - native connection to JUCE as an OS recognizable capture device
-- [ ] **Virtual audio device interface** - connects to teleconference applications as a regular microphone/speaker
+- [ ] **Virtual audio device interface** - connects to VoIP applications as a regular microphone/speaker
 - [ ] **Daemon** - works as a background process
 - [ ] **Internode synchronization** - "pulse" quanta for precisely timed playback across WASAN devices
 - [ ] **Beamforming** - collaborative spatial targeting
@@ -43,10 +46,16 @@ same data into simultaneously multiple distinct devices.
 - [ ] **Room transfer function estimation**
 - [ ] **Room reverberance simulation** - perception of presence in the space where audio is recorded (concert stadium, church, lecture hall, booth, etc.)
 - [ ] **Automated setup** - negotiate optimal communication approach, parameter settings, room acoustic evaluation, TDE, etc.
-- [ ] **Push-to-talk** - automatically muting participant when they are not speaking to reduce noise and confusion of participants.
+- [ ] **Push-to-talk** - automatically muting participant when they are not speaking to reduce noise and confusion of participants
+- [ ] **TecoGAN signal reconstruction** - audio quality artificial enhancement of bit-depth and sample rate via GANs
+for perceived audio quality increase and efficient (de)compression of data in VoIP
 
-System architecture vision.
+System architecture vision:
 ![Extended functionality](https://github.com/stijn-reniers/Windows_audio_aggregator/blob/aggregator/images/Presentation%20-%20Current%20Aggregator%20Functionality.png)
+
+The tool facilitates communication with the user via a CLI to interactively update, tune or select settings. 
+![A beautiful header-only interactive CLI library](https://github.com/daniele77/cli) by Daniele Pallastrelli (daniele77@github)
+is used for this purpose.
 
 ## Dataflow
 Picture below shows how data flows internally through the system, starting at the capture side and ending at the render side.

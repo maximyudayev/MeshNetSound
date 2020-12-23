@@ -4,7 +4,20 @@
 
 #include "AudioEffect.h"
 #include "AudioBuffer.h"
+#include "RingBufferChannel.h"
 #include <cmath>
+
+typedef struct FlangerContext {
+	float	sinePhase						{ 0.0 },
+			sinefrequency					{ 0.0 },
+			flangerDepth					{ 0.0 },
+			feedbackLevel					{ 0.0 },		// should ALWAYS be lower than 1 !!!
+			* delayBuffer,
+			* feedbackBuffer;
+
+	int		delayBufferWritePosition		{ 0 },
+			feedbackBufferWritePosition		{ 0 };
+} FLANGERCONTEXT;
 
 /// <summary>
 /// Class implementing a flanger algorithm using an FIR comb filter with optional feedback.
@@ -12,26 +25,18 @@
 class Flanger : public AudioEffect
 {
 	public:
-		Flanger(int sampleRate, int nrOfChannels)
+		Flanger(int sampleRate, int nrOfChannels, RingBufferChannel** pRingBufferChannel) : AudioEffect(sampleRate, nrOfChannels, (void**)pRingBufferChannel)
 		{
 			delayBufferSize = TRANSPOSITION * 2;
 
-			// allocate heap structure for delay buffer
-			delayBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
-			for (auto i = 0; i < nrOfChannels; i++)
+			for (int i = 0; i < nrOfChannels; i++)
 			{
-				delayBuffer[i] = (float*)malloc(sizeof(float) * delayBufferSize);
+				pRingBufferChannelMap[i].pRingBufferChannelEffectContext = new FLANGERCONTEXT();
+				// allocate heap structure for delay buffer
+				((FLANGERCONTEXT*)(pRingBufferChannelMap[i].pRingBufferChannelEffectContext))->delayBuffer = (float*)malloc(sizeof(float) * delayBufferSize);
+				// allocate heap structure for feedback buffer (same size as delaybuffer)
+				((FLANGERCONTEXT*)(pRingBufferChannelMap[i].pRingBufferChannelEffectContext))->feedbackBuffer = (float*)malloc(sizeof(float) * delayBufferSize);
 			}
-			
-			// allocate heap structure for feedback buffer (same size as delaybuffer)
-			feedbackBuffer = (float**)malloc(sizeof(float*) * nrOfChannels);
-			for (auto i = 0; i < nrOfChannels; i++)
-			{
-				feedbackBuffer[i] = (float*)malloc(sizeof(float) * delayBufferSize);
-			}
-
-			this->sampleRate = sampleRate;
-			this->nrOfChannels = nrOfChannels;
 		}
 
 		~Flanger()
@@ -39,123 +44,79 @@ class Flanger : public AudioEffect
 			// free heap structure for delay buffer
 			for (int i = 0; i < nrOfChannels; i++)
 			{
-				float* currentIntPtr = delayBuffer[i];
-				free(currentIntPtr);
-			}
-
-			for (int i = 0; i < nrOfChannels; i++)
-			{
-				float* currentIntPtr = feedbackBuffer[i];
-				free(currentIntPtr);
+				free(((FLANGERCONTEXT*)(pRingBufferChannelMap[i].pRingBufferChannelEffectContext))->delayBuffer);
+				free(((FLANGERCONTEXT*)(pRingBufferChannelMap[i].pRingBufferChannelEffectContext))->feedbackBuffer);
+				delete (FLANGERCONTEXT*)(pRingBufferChannelMap[i].pRingBufferChannelEffectContext);
 			}
 		}
 
-        /// <summary>
-        /// <para>Actual DSP callback, applies flanger to a single channel.</para>
+		/// <summary>
+		/// <para>Actual DSP callback, applies flanger to a single channel.</para>
 		/// <para>Note: when using multi-channel flanger, must be called for each channel in a loop./para>
 		/// <para>Uses one single delay line that is recombined with the current signal to create 
 		/// the comb-filter effect.</para>
 		/// <para>Performs linear interpolation on the delay time.</para>
-        /// </summary>
-        /// <param name="inbuffer"></param>
-        /// <param name="startSample"></param>
-        /// <param name="numSamples"></param>
-        /// <param name="maxDelayInSamples"></param>
-        /// <param name="channel"></param>
-        /// <param name="DeviceGain"></param>
-        void process(DSPPacket* inbuffer)	override					// pass input buffer by reference, get maxDelayInSamples from UI component
+		/// </summary>
+        /// <param name="pDSPPacket"></param>
+        void Process(DSPPacket* pDSPPacket)	override					// pass input buffer by reference, get maxDelayInSamples from UI component
         {
-			FLOAT** processBuffer = inbuffer->pData;
-			nrOfChannels = inbuffer->nChannels;
-			nrOfSamples = inbuffer->nSamples;
+			RINGCHANNELMAPEL* pContext = this->GetRingChannelMapEl(pDSPPacket->pRingBufferChannel);
+			pContext->nSamples = pDSPPacket->nSamples;
 			
-			for (auto channel = 0; channel < nrOfChannels; ++channel)
+			FillDelaybuffer(pContext, 1.0);
+
+			float* processBuffer = ((RingBufferChannel*)pContext->pRingBufferChannel)->GetBufferPointer();
+			int bufferSize = ((RingBufferChannel*)pContext->pRingBufferChannel)->GetBufferSize();
+			int offset = ((RingBufferChannel*)pContext->pRingBufferChannel)->GetReadOffset();
+			float* outputBuffer = pContext->fOutputBuffer;
+
+			float* delayBuffer = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->delayBuffer;
+			float* feedbackBuffer = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->feedbackBuffer;
+			int delayBufferWritePosition = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->delayBufferWritePosition;
+			int feedbackBufferWritePosition = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->feedbackBufferWritePosition;
+			float flangerDepth = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->flangerDepth;
+			float feedbackLevel = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->feedbackLevel;
+
+			for (int sample = 0; sample < pContext->nSamples; sample++)
 			{
-				fillDelaybuffer(nrOfSamples, channel, processBuffer[channel], 1.0);
+				const float* delay = delayBuffer;
+				const float* feedback = feedbackBuffer;
 
-				for (auto sample = 0; sample < nrOfSamples; ++sample)
-				{
-					const float* delay = delayBuffer[channel];
-					const float* feedback = feedbackBuffer[channel];
+				float delayTime = LFOSinewave(TRANSPOSITION, pContext);
+				int delayTimeInSamples = static_cast<int>(delayTime);
+				float fractionalDelay = delayTime - delayTimeInSamples;
 
-					float delayTime = lfo_sinewave(TRANSPOSITION, channel);
-					int delayTimeInSamples = static_cast<int>(delayTime);
-					float fractionalDelay = delayTime - delayTimeInSamples;
+				int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples) % delayBufferSize;		          // perform linear interpolation for now
+				int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples - 1) % delayBufferSize;
 
-					int readPosition1 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples) % delayBufferSize;		          // perform linear interpolation for now
-					int readPosition2 = (delayBufferSize + delayBufferWritePosition - delayTimeInSamples - 1) % delayBufferSize;
+				float output = processBuffer[(offset + sample) % bufferSize] 
+					+ flangerDepth * ((1.0 - fractionalDelay) * delay[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * delay[(readPosition2 + sample) % delayBufferSize])
+					+ feedbackLevel * ((1.0 - fractionalDelay) * feedback[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * feedback[(readPosition2 + sample) % delayBufferSize]);
 
-					float output = processBuffer[channel][sample] + flangerDepth * ((1.0 - fractionalDelay) * delay[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * delay[(readPosition2 + sample) % delayBufferSize])
-						+ feedbackLevel * ((1.0 - fractionalDelay) * feedback[(readPosition1 + sample) % delayBufferSize] + fractionalDelay * feedback[(readPosition2 + sample) % delayBufferSize]);
+				feedbackBuffer[feedbackBufferWritePosition + sample] = output;
 
-					feedbackBuffer[channel][feedbackBufferWritePosition + sample] = output;
-						
-					processBuffer[channel][sample] = output;
-					outputBuffer = processBuffer;
-
-
-				}
+				outputBuffer[sample] = output;
 			}
         }
-
 		
-		/// <summary>
-		/// <para>Returns the data of the specified channel of the processed buffer.</para>
-		/// </summary>
-		/// <param name="bufferLength"></param>
-		
-		float* getChannelData(int nChannel) override
-		{
-			return outputBuffer[nChannel];
-		}
-
-
-		/// <summary>
-		/// <para>Returns number of samples of the specified channel of the processed buffer.</para>
-		/// </summary>
-		/// <param name="bufferLength"></param>
-
-		int getNumSamples() override
-		{
-			return nrOfSamples;
-		}
-
 		/// <summary>
 		/// <para>Copies each packet received at the callback into the circular delay buffer.</para>
 		/// <para>Allows the algorithm to use an 'arbitrarily' delayed sample within the transposition range.
 		/// Lets LFO modulator specifiy the position in the buffer at any time instance for the delay line.</para>
 		/// </summary>
-		/// <param name="bufferLength"></param>
-		/// <param name="channel"></param>
-		/// <param name="delayBufferLength"></param>
-		/// <param name="bufferData"></param>
+		/// <param name="pContext"></param>
 		/// <param name="gain"></param>
-		void fillDelaybuffer(const int bufferLength, int channel, float* bufferData, const float gain)
+		void FillDelaybuffer(RINGCHANNELMAPEL* pContext, const float gain)
 		{
-			if (delayBufferSize > bufferLength + delayBufferWritePosition)
-			{
-				// Copy data from main input ring buffer chunk into delay buffer
-				for (auto sample = 0; sample < bufferLength; sample++)
-				{
-					delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
-				}
-			}
-			else
-			{
-				const int delayBufferRemaining = delayBufferSize - delayBufferWritePosition;
+			float* buffer = ((RingBufferChannel*)pContext->pRingBufferChannel)->GetBufferPointer();
+			int bufferSize = ((RingBufferChannel*)pContext->pRingBufferChannel)->GetBufferSize();
+			int offset = ((RingBufferChannel*)pContext->pRingBufferChannel)->GetReadOffset();
+			float* delayBuffer = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->delayBuffer;
+			int delayBufferWritePosition = ((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->delayBufferWritePosition;
 
-				// Copy data from main input ring buffer chunk that still fits into delay buffer
-				for (auto sample = 0; sample < delayBufferRemaining; sample++)
-				{
-					delayBuffer[channel][delayBufferWritePosition + sample] = gain * bufferData[sample];
-				}
-
-				// Copy the rest of the data from main input ring buffer chunk into delay buffer
-				for (auto sample = 0; sample < delayBufferRemaining; sample++)
-				{
-					delayBuffer[channel][sample] = gain * bufferData[delayBufferRemaining + sample];
-				}
-			}
+			// Copy data from main input ring buffer chunk into delay buffer
+			for (int sample = 0; sample < bufferSize; sample++)
+				delayBuffer[(delayBufferWritePosition + sample) % delayBufferSize] = gain * buffer[(offset + sample) % bufferSize];
 		}
 
 		/// <summary>
@@ -164,13 +125,16 @@ class Flanger : public AudioEffect
 		/// in the delay line.</para>
 		/// </summary>
 		/// <param name="maxDelayInSamples"></param>
-		/// <param name="channel"></param>
+		/// <param name="pContext"></param>
 		/// <returns></returns>
-		float lfo_sinewave(int maxDelayInSamples, int channel)
+		float LFOSinewave(int maxDelayInSamples, RINGCHANNELMAPEL* pContext)
 		{
-			sinePhase[channel] = sinePhase[channel] + sinefrequency/sampleRate;
-			if (sinePhase[channel] >= 1) sinePhase[channel] -= 1;
-			return (maxDelayInSamples/2)*(sin(2 * M_PI * sinePhase[channel])+1);
+			float* sinefrequency = &((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->sinefrequency;
+			float* sinePhase = &((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->sinePhase;
+			
+			*sinePhase = *sinePhase + *sinefrequency / sampleRate;
+			if (*sinePhase >= 1) *sinePhase -= 1;
+			return (maxDelayInSamples / 2) * (sin(2 * M_PI * *sinePhase) + 1);
 		}
 
 		/// <summary>
@@ -179,67 +143,50 @@ class Flanger : public AudioEffect
 		/// Must be called by the owning class after the channel loop completed.</para>
 		/// </summary>
 		/// <param name="numsamplesInBuffer"></param>
-		void adjustDelayBufferWritePosition(int numsamplesInBuffer)                                                             
+		/// <param name="pContext"></param>
+		void AdjustDelayBufferWritePosition(int numsamplesInBuffer, RINGCHANNELMAPEL* pContext)
 		{
-			delayBufferWritePosition += numsamplesInBuffer;
-			delayBufferWritePosition %= delayBufferSize;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->delayBufferWritePosition += numsamplesInBuffer;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->delayBufferWritePosition %= delayBufferSize;
 		}
 		
 		/// <summary>
 		/// <para>Updates the write index of the feedback buffer after storing a packet in the callback.</para>
 		/// </summary>
 		/// <param name="numsamplesInBuffer"></param>
-		void adjustFeedBackBufferWritePosition(int numsamplesInBuffer)                                                             
+		void AdjustFeedBackBufferWritePosition(int numsamplesInBuffer, RINGCHANNELMAPEL* pContext)
 		{
-			feedbackBufferWritePosition += numsamplesInBuffer;
-			feedbackBufferWritePosition %= delayBufferSize;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->feedbackBufferWritePosition += numsamplesInBuffer;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->feedbackBufferWritePosition %= delayBufferSize;
 		}
 
 		/// <summary>
 		/// <para>Setter member function for GUI controlled owner of the flanger object.</para>
 		/// </summary>
 		/// <param name="depth"></param>
-		void setDepth(float depth)
+		void SetDepth(float depth, RINGCHANNELMAPEL* pContext)
 		{
-			flangerDepth = depth;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->flangerDepth = depth;
 		}
 
 		/// <summary>
 		/// <para></para>
 		/// </summary>
 		/// <param name="feedback"></param>
-		void setFeedback(float feedback)
+		void SetFeedback(float feedback, RINGCHANNELMAPEL* pContext)
 		{
-			flangerDepth = feedback;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->feedbackLevel = feedback;
 		}
 
 		/// <summary>
 		/// <para></para>
 		/// </summary>
 		/// <param name="rate"></param>
-		void setLFO(float rate)
+		void SetLFO(float rate, RINGCHANNELMAPEL* pContext)
 		{
-			sinefrequency = rate;
+			((FLANGERCONTEXT*)pContext->pRingBufferChannelEffectContext)->sinefrequency = rate;
 		}
 
 	private:
-		float		sinePhase[2]				{ 0.0, 0.0 },
-					sinefrequency				{ 0.0 },
-					flangerDepth				{ 0.0 },
-					feedbackLevel				{ 0.0 },		// should ALWAYS be lower than 1 !!
-					sampleRate					{ AGGREGATOR_SAMPLE_FREQ },
-					** delayBuffer,
-					** feedbackBuffer;
-		
-
-		int							delayBufferWritePosition	{ 0 }, 
-									feedbackBufferWritePosition { 0 }, 
-									nrOfChannels,
-									nrOfSamples,
-									delayBufferSize;
-
-		float**						delayBuffer;
-		float**						feedbackBuffer;
-		float**						outputBuffer;
-
+		int			delayBufferSize;
 };
