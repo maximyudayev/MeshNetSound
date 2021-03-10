@@ -1,6 +1,6 @@
 # Massively Scalable WASAN Aggregator
 Teleconferencing Windows audio utility for sound quality enhancement and audio effect generation via a WASAN
-for the Master of Electronics and ICT course of R&D at KU Leuven 2020-2021, case study of ConneXounds.
+for the Master of Electronics and ICT course of R&D at KU Leuven 2020-2021.
 
 The utility performs aggregation of an arbitrary number of devices, each of arbitrary number of channels, and sampled each at an 
 arbitrary sample rate, both hardware, software, and networked. In case of the first two, as long as they are enumerable by the OS, 
@@ -51,7 +51,7 @@ same data into simultaneously multiple distinct devices.
 for perceived audio quality increase and efficient (de)compression of data in VoIP
 
 System architecture vision:
-![Extended functionality](https://github.com/maximyudayev/ConneXounds/blob/main/images/Presentation%20-%20Current%20Aggregator%20Functionality.png)
+![Extended functionality](https://github.com/maximyudayev/MeshNetSound/blob/main/images/Presentation%20-%20Current%20Aggregator%20Functionality.png)
 
 The tool facilitates communication with the user via a CLI to interactively update, tune or select settings. 
 ![A beautiful header-only interactive CLI library](https://github.com/daniele77/cli) by Daniele Pallastrelli (daniele77@github)
@@ -59,7 +59,7 @@ is used for this purpose.
 
 ## Dataflow
 Picture below shows how data flows internally through the system, starting at the capture side and ending at the render side.
-![Data flow description](https://github.com/maximyudayev/ConneXounds/blob/main/images/Data%20Flow%20Description.png)
+![Data flow description](https://github.com/maximyudayev/MeshNetSound/blob/main/images/Data%20Flow%20Description.png)
 
 The system does all the processing in-place, without unnecessary, time-consuming, and memory occupying copy-and-move operations:
 1. WASAPI or UDP server provid a pointer to a buffer where kernel wrote audio data

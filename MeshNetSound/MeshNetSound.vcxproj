@@ -20,9 +20,10 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
-    <ProjectGuid>{90CD6CF6-D83A-448C-BA88-33529AAE01D9}</ProjectGuid>
-    <RootNamespace>ConnexoundsDSPWASANChallengeapplication1</RootNamespace>
+    <ProjectGuid>{9086B90C-39A1-4849-B64D-0D8F43B80A05}</ProjectGuid>
+    <RootNamespace>MeshNetSound</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>MeshNetSound</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
